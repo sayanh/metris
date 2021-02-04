@@ -2,40 +2,77 @@ package edp
 
 import (
 	"bytes"
-	"io/ioutil"
+	"fmt"
 	"net/http"
-	"net/url"
 	"time"
+
+	"github.com/pkg/errors"
+
+	"github.com/sirupsen/logrus"
 )
 
 type Client struct {
-	httpClient *http.Client
-	url        *url.URL
+	HttpClient *http.Client
+	Config     *Config
+	Logger     *logrus.Logger
 }
 
-func (eClient Client) NewClient(url *url.URL, timeout time.Duration) *Client {
-	httpClient := http.Client{
-		Transport:     http.DefaultTransport,
-		CheckRedirect: nil,
-		Jar:           nil,
-		Timeout:       timeout,
+const (
+	edpPathFormat   = "%s/namespaces/%s/dataStreams/%s/%s/dataTenants/%s/%s/events"
+	contentType     = "application/json;charset=utf-8"
+	userAgentMetris = "metris"
+)
+
+func NewClient(timeout time.Duration, config *Config) *Client {
+	httpClient := &http.Client{
+		Transport: http.DefaultTransport,
+		Timeout:   timeout,
 	}
 	return &Client{
-		httpClient: &httpClient,
-		url:        url,
+		HttpClient: httpClient,
+		Logger:     logrus.New(),
+		Config:     config,
 	}
 }
 
-func (eClient Client) newRequest() *http.Request {
+func (eClient Client) NewRequest(dataTenant string, eventData []byte) (*http.Request, error) {
+	edpURL := fmt.Sprintf(edpPathFormat,
+		eClient.Config.URL,
+		eClient.Config.Namespace,
+		eClient.Config.DataStream,
+		eClient.Config.DataStreamVersion,
+		dataTenant,
+		eClient.Config.DataStreamEnv,
+	)
 
-	return &http.Request{
-		Method: http.MethodPost,
-		URL:    eClient.url,
+	eClient.Logger.Debugf("sending event to '%s'", edpURL)
+	req, err := http.NewRequest(http.MethodPost, edpURL, bytes.NewBuffer(eventData))
+	if err != nil {
+		return nil, fmt.Errorf("failed generate request for EDP, %d: %v", http.StatusBadRequest, err)
 	}
+
+	req.Header.Set("User-Agent", userAgentMetris)
+	req.Header.Add("Content-Type", contentType)
+	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", eClient.Config.Token))
+
+	return req, nil
 }
 
-func (eClient Client) Send(data []byte) (*http.Response, error) {
-	req := eClient.newRequest()
-	req.Body = ioutil.NopCloser(bytes.NewReader([]byte(data)))
-	return eClient.httpClient.Do(req)
+func (eClient Client) Send(req *http.Request) (*http.Response, error) {
+
+	resp, err := eClient.HttpClient.Do(req)
+	if err != nil {
+		failedErr := errors.Wrapf(err, "failed to POST event to EDP")
+		eClient.Logger.Errorf("%v", failedErr)
+		return nil, failedErr
+	}
+
+	defer func() {
+		err := resp.Body.Close()
+		if err != nil {
+			eClient.Logger.Warn(err)
+		}
+	}()
+
+	return resp, nil
 }

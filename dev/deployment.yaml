@@ -1,3 +1,4 @@
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -31,10 +32,23 @@ spec:
               configMapKeyRef:
                 name: public-cloud-specs
                 key: providers
+          - name: EDP_URL
+            value: http://edp-mock.kcp-system:8080
+          - name: EDP_TOKEN
+            valueFrom:
+              secretKeyRef:
+                key: token
+                name: kcp-metris
         volumeMounts:
           - mountPath: /gardener
             name: gardener-kubeconfig
             readOnly: true
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+
+        ## readiness and liveness probe
       restartPolicy: Always
       schedulerName: default-scheduler
       terminationGracePeriodSeconds: 30
@@ -42,3 +56,4 @@ spec:
       - name: gardener-kubeconfig
         secret:
           secretName: gardener-credentials
+

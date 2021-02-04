@@ -8,9 +8,14 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+const (
+	nodeLabel = "beta.kubernetes.io/instance-type"
+)
+
 type EventStream struct {
 	ShootName string
 	Metric    edp.ConsumptionMetrics
+	Tenant    string
 }
 
 type Input struct {
@@ -23,7 +28,7 @@ type NodeInfo struct {
 	memory int
 }
 
-func (inp Input) Parse(shootName string, providers *Providers) EventStream {
+func (inp Input) Parse(shootName, tenant string, providers *Providers) EventStream {
 
 	metric := new(edp.ConsumptionMetrics)
 	provisionedCPUs := 0
@@ -31,7 +36,7 @@ func (inp Input) Parse(shootName string, providers *Providers) EventStream {
 	providerType := inp.shoot.Spec.Provider.Type
 	vmTypes := make(map[string]int)
 	for _, node := range inp.nodes.Items {
-		nodeType := node.Labels["beta.kubernetes.io/instance-type"]
+		nodeType := node.Labels[nodeLabel]
 		nodeType = strings.ToLower(nodeType)
 		vmFeatures := providers.GetFeatures(providerType, nodeType)
 		provisionedCPUs += vmFeatures.CpuCores
@@ -51,6 +56,7 @@ func (inp Input) Parse(shootName string, providers *Providers) EventStream {
 	eventStream := EventStream{
 		ShootName: shootName,
 		Metric:    *metric,
+		Tenant:    tenant,
 	}
 	return eventStream
 }
