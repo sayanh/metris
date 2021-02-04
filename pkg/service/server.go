@@ -47,8 +47,8 @@ func (s *Server) Start() {
 		s.Logger.Info("HTTP server stopped")
 	}()
 	s.Logger.Infof("started HTTP server at %s", s.Addr)
-	<-done
 
+	<-done
 	gracefulCtx, cancelShutdown := context.WithTimeout(context.Background(), serverStopTimeout)
 	defer cancelShutdown()
 
