@@ -60,9 +60,8 @@ func (p Process) getRuntimes() (*kebruntime.RuntimesPage, error) {
 		resp, err = p.KEBClient.Do(p.KEBReq)
 		if err != nil {
 			p.Logger.Warnf("will be retried: failed while getting runtimes from KEB: %v", err)
-			return err
 		}
-		return nil
+		return
 	})
 
 	if err != nil {
@@ -105,7 +104,7 @@ func (p Process) scrapeGardenerCluster(wg *sync.WaitGroup, shootName string) {
 	}
 
 	// Get nodes
-	nodes, err := getNodes(ctx, string(secret.Data["kubeconfig"]), shootName)
+	nodes, err := getNodes(ctx, string(secret.Data["kubeconfig"]))
 	if err != nil {
 		p.ResultChan <- getErrResult(err, "failed to get nodes list from shoot: %s", shootName)
 		return
@@ -140,7 +139,7 @@ func (p Process) getOldMetric(result Result) ([]byte, error) {
 	var err error
 	oldEventStream, found := p.Cache.Get(result.Output.ShootName)
 	if !found {
-		notFoundErr := fmt.Errorf("failed to get old event stream for shoot: %s", result.Output.ShootName)
+		notFoundErr := fmt.Errorf("failed to get an old event stream for shoot: %s", result.Output.ShootName)
 		p.Logger.Error(notFoundErr)
 		return []byte{}, notFoundErr
 	}
