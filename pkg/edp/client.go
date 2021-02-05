@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
+
 	"github.com/pkg/errors"
 
 	"github.com/sirupsen/logrus"
@@ -59,8 +62,27 @@ func (eClient Client) NewRequest(dataTenant string, eventData []byte) (*http.Req
 }
 
 func (eClient Client) Send(req *http.Request) (*http.Response, error) {
+	var resp *http.Response
+	var err error
+	customBackoff := wait.Backoff{
+		Steps:    4,
+		Duration: 10 * time.Second,
+		Factor:   5.0,
+		Jitter:   0.1,
+	}
+	err = retry.OnError(customBackoff, func(err error) bool {
+		if err != nil {
+			return true
+		}
+		return false
+	}, func() (err error) {
+		resp, err = eClient.HttpClient.Do(req)
+		if err != nil {
+			eClient.Logger.Warnf("will be retried: failed send event stream to EDP: %v", err)
+		}
+		return
+	})
 
-	resp, err := eClient.HttpClient.Do(req)
 	if err != nil {
 		failedErr := errors.Wrapf(err, "failed to POST event to EDP")
 		eClient.Logger.Errorf("%v", failedErr)
