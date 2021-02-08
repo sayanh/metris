@@ -26,10 +26,10 @@ const (
 	userAgentMetris = "metris"
 )
 
-func NewClient(timeout time.Duration, config *Config) *Client {
+func NewClient(config *Config) *Client {
 	httpClient := &http.Client{
 		Transport: http.DefaultTransport,
-		Timeout:   timeout,
+		Timeout:   config.Timeout,
 	}
 	return &Client{
 		HttpClient: httpClient,
@@ -64,9 +64,10 @@ func (eClient Client) NewRequest(dataTenant string, eventData []byte) (*http.Req
 func (eClient Client) Send(req *http.Request) (*http.Response, error) {
 	var resp *http.Response
 	var err error
+	// TODO make it configurable
 	customBackoff := wait.Backoff{
-		Steps:    4,
-		Duration: 10 * time.Second,
+		Steps:    eClient.Config.EventRetry,
+		Duration: 5 * time.Second,
 		Factor:   5.0,
 		Jitter:   0.1,
 	}
@@ -78,7 +79,13 @@ func (eClient Client) Send(req *http.Request) (*http.Response, error) {
 	}, func() (err error) {
 		resp, err = eClient.HttpClient.Do(req)
 		if err != nil {
-			eClient.Logger.Warnf("will be retried: failed send event stream to EDP: %v", err)
+			eClient.Logger.Warnf("will be retried: failed to send event stream to EDP: %v", err)
+		}
+
+		if resp.StatusCode != http.StatusCreated {
+			non2xxErr := fmt.Errorf("failed to send event stream as EDP returned HTTP: %d", resp.StatusCode)
+			eClient.Logger.Warnf("will be retried: %v", non2xxErr)
+			err = non2xxErr
 		}
 		return
 	})

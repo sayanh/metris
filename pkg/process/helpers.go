@@ -110,14 +110,9 @@ func getSecretForShoot(ctx context.Context, shootName string, secretClient dynam
 	return convertRuntimeObjToSecret(unstructuredSecret)
 }
 
-func getNodes(ctx context.Context, shootConfig string) (*corev1.NodeList, error) {
+func getNodes(ctx context.Context, client dynamic.Interface) (*corev1.NodeList, error) {
 
-	// Create a dynamicClient for nodes in Shoot cluster
-	dynamicClientForShoot, err := getDynamicClientForShoot(shootConfig)
-	if err != nil {
-		return nil, err
-	}
-	nodeClient := dynamicClientForShoot.Resource(nodeGVR)
+	nodeClient := client.Resource(nodeGVR)
 	nodesUnstructured, err := nodeClient.List(ctx, metaV1.ListOptions{})
 	if err != nil {
 		return nil, err

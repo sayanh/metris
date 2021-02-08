@@ -104,7 +104,12 @@ func (p Process) scrapeGardenerCluster(wg *sync.WaitGroup, shootName string) {
 	}
 
 	// Get nodes
-	nodes, err := getNodes(ctx, string(secret.Data["kubeconfig"]))
+	nodeClient, err := getDynamicClientForShoot(string(secret.Data["kubeconfig"]))
+	if err != nil {
+		p.ResultChan <- getErrResult(err, "failed to generate dynamic client for nodes from shoot: %s", shootName)
+		return
+	}
+	nodes, err := getNodes(ctx, nodeClient)
 	if err != nil {
 		p.ResultChan <- getErrResult(err, "failed to get nodes list from shoot: %s", shootName)
 		return

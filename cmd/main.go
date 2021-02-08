@@ -93,7 +93,7 @@ func main() {
 	// Creating cache with no expiration
 	cache := gocache.New(gocache.NoExpiration, 0*time.Second)
 
-	edpClient := edp.NewClient(edpConfig.Timeout, edpConfig)
+	edpClient := edp.NewClient(edpConfig)
 
 	metrisProcess := metrisprocess.Process{
 		KEBClient:      kebClient,

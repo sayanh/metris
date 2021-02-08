@@ -1,7 +1,9 @@
 {
+    "count": 4,
+    "totalCount": 4,
     "data": [
         {
-            "instanceID": "{{instance_id}}",
+            "instanceID": "fooinstanceid1",
             "runtimeID": "ca412f0d-19c3-47cb-8220-44ff69d1b14c",
             "globalAccountID": "3e64ebae-38b5-46a0-b1ed-9ccee153a0ae",
             "subAccountID": "",
@@ -174,7 +176,5 @@
             },
             "userID": ""
         }
-    ],
-    "count": 4,
-    "totalCount": 4
+    ]
 }
