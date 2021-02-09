@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/pprof"
-	"time"
 
 	"github.com/kyma-incubator/metris/pkg/keb"
 
@@ -17,35 +16,15 @@ import (
 
 	"github.com/kyma-incubator/metris/pkg/service"
 
+	gardenersecret "github.com/kyma-incubator/metris/pkg/gardener/secret"
+	gardenershoot "github.com/kyma-incubator/metris/pkg/gardener/shoot"
 	metrisprocess "github.com/kyma-incubator/metris/pkg/process"
 
-	"k8s.io/apimachinery/pkg/runtime/schema"
-
-	"k8s.io/client-go/dynamic"
-
-	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	"github.com/kelseyhightower/envconfig"
 	"github.com/kyma-incubator/metris/env"
 	"github.com/kyma-incubator/metris/options"
 	gocache "github.com/patrickmn/go-cache"
 	"github.com/sirupsen/logrus"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/client-go/tools/clientcmd"
-)
-
-var (
-	log      = logrus.New()
-	shootGVR = schema.GroupVersionResource{
-		Version:  gardenerv1beta1.SchemeGroupVersion.Version,
-		Group:    gardenerv1beta1.SchemeGroupVersion.Group,
-		Resource: "shoots",
-	}
-
-	secretGVR = schema.GroupVersionResource{
-		Version:  corev1.SchemeGroupVersion.Version,
-		Group:    corev1.SchemeGroupVersion.Group,
-		Resource: "secrets",
-	}
 )
 
 const (
@@ -55,8 +34,10 @@ const (
 
 func main() {
 	opts := options.ParseArgs()
-	log.Printf("Starting application with options: ", opts.String())
+	log := logrus.New()
+	log.Level = opts.LogLevel
 
+	log.Printf("Starting application with options: ", opts.String())
 	cfg := new(env.Config)
 	if err := envconfig.Process("", cfg); err != nil {
 		log.Fatalf("failed to load env config: %s", err)
@@ -71,16 +52,15 @@ func main() {
 	}
 	log.Infof("public cloud spec: %v", publicCloudSpecs)
 
-	// Create dynamic client for gardener to get shoot and secret
-	k8sConfig := GetGardenerKubeconfig(opts)
-	client, err := k8sConfig.ClientConfig()
+	secretClient, err := gardenersecret.NewClient(opts)
 	if err != nil {
-		log.Panicf("failed to generate client for k8s: %v", client)
+		log.Fatalf("failed to generate client for gardener secrets: %v", err)
 	}
-	restConfig := dynamic.ConfigFor(client)
-	dynClient := dynamic.NewForConfigOrDie(restConfig)
-	shootClient := dynClient.Resource(shootGVR).Namespace(opts.GardenerNamespace)
-	secretClient := dynClient.Resource(secretGVR).Namespace(opts.GardenerNamespace)
+
+	shootClient, err := gardenershoot.NewClient(opts)
+	if err != nil {
+		log.Fatalf("failed to generate client for gardener shoots: %v", err)
+	}
 
 	// Create a client for KEB communication
 	kebConfig := new(keb.Config)
@@ -89,8 +69,9 @@ func main() {
 	}
 	kebClient := keb.NewClient(kebConfig, log)
 	log.Infof("keb config: %v", kebConfig)
-	// Creating cache with no expiration
-	cache := gocache.New(gocache.NoExpiration, 0*time.Second)
+
+	// Creating cache with no expiration and the data will never be cleaned up
+	cache := gocache.New(gocache.NoExpiration, gocache.NoExpiration)
 
 	// Creating EDP client
 	edpConfig := new(edp.Config)
@@ -103,7 +84,7 @@ func main() {
 
 	metrisProcess := metrisprocess.Process{
 		KEBClient:       kebClient,
-		GardenerClient:  shootClient,
+		ShootClient:     shootClient,
 		SecretClient:    secretClient,
 		EDPClient:       edpClient,
 		Logger:          log,
@@ -119,7 +100,7 @@ func main() {
 
 	// add debug service.
 	if opts.DebugPort > 0 {
-		enableDebugging(opts.DebugPort)
+		enableDebugging(opts.DebugPort, log)
 	}
 	// Start a server to cater to the metrics and healthz endpoints
 	router := mux.NewRouter()
@@ -137,7 +118,7 @@ func main() {
 	metrisSvr.Start()
 }
 
-func enableDebugging(debugPort int) {
+func enableDebugging(debugPort int, log *logrus.Logger) {
 	debugRouter := mux.NewRouter()
 	// for security reason we always listen on localhost
 	debugSvc := service.Server{
@@ -160,9 +141,9 @@ func enableDebugging(debugPort int) {
 	}()
 }
 
-func GetGardenerKubeconfig(opts *options.Options) clientcmd.ClientConfig {
-	loadingRules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: opts.GardenerSecretPath}
-	configOverrides := &clientcmd.ConfigOverrides{}
-	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
-	return kubeConfig
-}
+//func GetGardenerKubeconfig(opts *options.Options) clientcmd.ClientConfig {
+//	loadingRules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: opts.GardenerSecretPath}
+//	configOverrides := &clientcmd.ConfigOverrides{}
+//	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
+//	return kubeConfig
+//}

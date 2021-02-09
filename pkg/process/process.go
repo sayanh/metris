@@ -4,12 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
 	"github.com/kyma-incubator/metris/pkg/keb"
 
 	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
+	metriscache "github.com/kyma-incubator/metris/pkg/cache"
+	gardenersecret "github.com/kyma-incubator/metris/pkg/gardener/secret"
+	gardenershoot "github.com/kyma-incubator/metris/pkg/gardener/shoot"
+	skrnode "github.com/kyma-incubator/metris/pkg/skr_shoot/node"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -21,15 +26,14 @@ import (
 	kebruntime "github.com/kyma-project/control-plane/components/kyma-environment-broker/common/runtime"
 	"github.com/patrickmn/go-cache"
 	"github.com/sirupsen/logrus"
-	"k8s.io/client-go/dynamic"
 )
 
 type Process struct {
 	KEBClient       *keb.Client
 	EDPClient       *edp.Client
 	Queue           workqueue.DelayingInterface
-	GardenerClient  dynamic.ResourceInterface
-	SecretClient    dynamic.ResourceInterface
+	ShootClient     *gardenershoot.Client
+	SecretClient    *gardenersecret.Client
 	Logger          *logrus.Logger
 	Cache           *cache.Cache
 	Providers       *Providers
@@ -50,44 +54,43 @@ func (p Process) generateMetricFor(subAccountID string) (metric *edp.Consumption
 		err = fmt.Errorf("subAccountID was not found in cache")
 		return
 	}
-	var engineInfo EngineInfo
+	var record metriscache.Record
 	var ok bool
-	if engineInfo, ok = obj.(EngineInfo); !ok {
+	if record, ok = obj.(metriscache.Record); !ok {
 		err = fmt.Errorf("bad item from cache")
 		return
 	}
 
-	p.Logger.Infof("engine Info found: %+v", engineInfo)
+	p.Logger.Debugf("record found from cache: %+v", record)
 
-	shootName = engineInfo.shootName
+	shootName = record.ShootName
 
-	if engineInfo.kubeConfig == "" {
+	if record.KubeConfig == "" {
 		// Get shoot kubeconfig secret
 		var secret *corev1.Secret
-		secret, err = getSecretForShoot(ctx, shootName, p.SecretClient)
+		secret, err = p.SecretClient.Get(ctx, shootName)
 		if err != nil {
 			return
 		}
-		engineInfo.kubeConfig = string(secret.Data["kubeconfig"])
+		record.KubeConfig = string(secret.Data["kubeconfig"])
 	}
 
 	// Get shoot CR
 	var shoot *gardenerv1beta1.Shoot
-	shoot, err = getShoot(ctx, shootName, p.GardenerClient)
+	shoot, err = p.ShootClient.Get(ctx, shootName)
 	if err != nil {
 		return
 	}
 
 	// Get nodes dynamic client
-	var nodeClient dynamic.Interface
-	nodeClient, err = getDynamicClientForShoot(engineInfo.kubeConfig)
+	nodesClient, err := skrnode.NewClient(record.KubeConfig)
 	if err != nil {
 		return
 	}
 
 	// Get nodes
 	var nodes *corev1.NodeList
-	nodes, err = getNodes(ctx, nodeClient)
+	nodes, err = nodesClient.List(ctx)
 	if err != nil {
 		return
 	}
@@ -118,20 +121,20 @@ func (p Process) generateMetricFor(subAccountID string) (metric *edp.Consumption
 func (p Process) getOldMetric(subAccountID string) ([]byte, error) {
 	var oldMetricData []byte
 	var err error
-	oldEngineInfoObj, found := p.Cache.Get(subAccountID)
+	oldRecordObj, found := p.Cache.Get(subAccountID)
 	if !found {
 		notFoundErr := fmt.Errorf("subAccountID: %s not found", subAccountID)
 		p.Logger.Error(notFoundErr)
 		return []byte{}, notFoundErr
 	}
 
-	if oldEngineInfo, ok := oldEngineInfoObj.(EngineInfo); ok {
-		if oldEngineInfo.metric == nil {
+	if oldRecord, ok := oldRecordObj.(metriscache.Record); ok {
+		if oldRecord.Metric == nil {
 			notFoundErr := fmt.Errorf("old metrics for subAccountID: %s not found", subAccountID)
 			p.Logger.Error(notFoundErr)
 			return []byte{}, notFoundErr
 		}
-		oldMetricData, err = json.Marshal(*oldEngineInfo.metric)
+		oldMetricData, err = json.Marshal(*oldRecord.Metric)
 		if err != nil {
 			return []byte{}, err
 		}
@@ -155,12 +158,12 @@ func (p Process) pollKEBForRuntimes() {
 		p.Logger.Debugf("num of runtimes are: %d", runtimesPage.Count)
 		p.populateCacheAndQueue(runtimesPage)
 		// TODO remove me "TESTING PURPOSES"
-		_ = p.Cache.Add("39ba9a66-2c1a-4fe4-a28e-6e5db434084e", EngineInfo{
-			subAccountID: "39ba9a66-2c1a-4fe4-a28e-6e5db434084e",
-			shootName:    "c-69e1cca",
-			kubeConfig:   "",
-			metric:       nil,
-		}, cache.NoExpiration)
+		//_ = p.Cache.Add("39ba9a66-2c1a-4fe4-a28e-6e5db434084e", EngineInfo{
+		//	subAccountID: "39ba9a66-2c1a-4fe4-a28e-6e5db434084e",
+		//	shootName:    "c-69e1cca",
+		//	kubeConfig:   "",
+		//	metric:       nil,
+		//}, cache.NoExpiration)
 		// ------------------------------------
 		p.Logger.Infof("waiting to poll KEB again after %v....", p.KEBClient.Config.PollWaitDuration)
 		time.Sleep(p.KEBClient.Config.PollWaitDuration)
@@ -241,16 +244,16 @@ func (p Process) Execute() {
 		p.Logger.Infof("successfully sent event stream for subaccountID: %s, shoot: %s", subAccountID, shootName)
 
 		if len(oldMetric) == 0 {
-			newEngineInfo := EngineInfo{
-				subAccountID: subAccountID,
-				shootName:    shootName,
-				kubeConfig:   kubeconfig,
-				metric:       metric,
+			newRecord := metriscache.Record{
+				SubAccountID: subAccountID,
+				ShootName:    shootName,
+				KubeConfig:   kubeconfig,
+				Metric:       metric,
 			}
-			p.Cache.Set(newEngineInfo.subAccountID, newEngineInfo, cache.NoExpiration)
+			p.Cache.Set(newRecord.SubAccountID, newRecord, cache.NoExpiration)
 			p.Queue.AddAfter(subAccountID, p.ScrapeInterval)
 			p.Logger.Infof("Length of queue: %d", p.Queue.Len())
-			p.Logger.Debugf("successfully saved metric and requed for subAccountID %s, %s", newEngineInfo.subAccountID, string(payload))
+			p.Logger.Debugf("successfully saved metric and requed for subAccountID %s, %s", newRecord.SubAccountID, string(payload))
 		}
 	}
 }
@@ -273,11 +276,11 @@ func (p Process) sendEventStreamToEDP(tenant string, payload []byte) error {
 	return nil
 }
 
-type EngineInfo struct {
-	subAccountID string
-	shootName    string
-	kubeConfig   string
-	metric       *edp.ConsumptionMetrics
+func isSuccess(status int) bool {
+	if status >= http.StatusOK && status < http.StatusMultipleChoices {
+		return true
+	}
+	return false
 }
 
 func isClusterTrackable(runtime *kebruntime.RuntimeDTO) bool {
@@ -296,14 +299,14 @@ func (p Process) populateCacheAndQueue(runtimes *kebruntime.RuntimesPage) {
 		_, isFound := p.Cache.Get(runtime.SubAccountID)
 		if isClusterTrackable(&runtime) {
 			if !isFound {
-				engineInfo := EngineInfo{
-					subAccountID: runtime.SubAccountID,
-					shootName:    runtime.ShootName,
-					kubeConfig:   "",
-					metric:       nil,
+				record := metriscache.Record{
+					SubAccountID: runtime.SubAccountID,
+					ShootName:    runtime.ShootName,
+					KubeConfig:   "",
+					Metric:       nil,
 				}
 				if runtime.SubAccountID != "" {
-					err := p.Cache.Add(runtime.SubAccountID, engineInfo, cache.NoExpiration)
+					err := p.Cache.Add(runtime.SubAccountID, record, cache.NoExpiration)
 					if err != nil {
 						p.Logger.Errorf("failed to add subAccountID: %v to cache hence skipping queueing it", err)
 						continue

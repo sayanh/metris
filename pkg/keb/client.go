@@ -21,6 +21,11 @@ type Client struct {
 	Config     *Config
 }
 
+const (
+	backOffJitter = 0.1
+	backOffFactor = 5.0
+)
+
 func NewClient(config *Config, logger *logrus.Logger) *Client {
 	kebHTTPClient := &http.Client{
 		Transport: http.DefaultTransport,
@@ -34,7 +39,6 @@ func NewClient(config *Config, logger *logrus.Logger) *Client {
 }
 
 func (c Client) NewRequest() (*http.Request, error) {
-	c.Logger.Infof("###### config: %v", c.Config)
 	kebURL, err := url.ParseRequestURI(c.Config.URL)
 	if err != nil {
 		return nil, err
@@ -52,8 +56,8 @@ func (c Client) GetRuntimes(req *http.Request) (*kebruntime.RuntimesPage, error)
 	customBackoff := wait.Backoff{
 		Steps:    c.Config.RetryCount,
 		Duration: c.HTTPClient.Timeout,
-		Factor:   5.0,
-		Jitter:   0.1,
+		Factor:   backOffFactor,
+		Jitter:   backOffJitter,
 	}
 	var resp *http.Response
 	var err error
