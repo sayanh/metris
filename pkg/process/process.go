@@ -4,14 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
-	"net/http"
 	"sync"
 	"time"
 
-	"k8s.io/apimachinery/pkg/util/wait"
+	"github.com/kyma-incubator/metris/pkg/keb"
 
-	"k8s.io/client-go/util/retry"
+	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
+
+	corev1 "k8s.io/api/core/v1"
+
+	"k8s.io/client-go/util/workqueue"
 
 	"github.com/pkg/errors"
 
@@ -23,16 +25,16 @@ import (
 )
 
 type Process struct {
-	KEBClient      *http.Client
-	KEBReq         *http.Request
-	EDPClient      *edp.Client
-	GardenerClient dynamic.ResourceInterface
-	SecretClient   dynamic.ResourceInterface
-	ResultChan     chan Result
-	Logger         *logrus.Logger
-	Cache          *cache.Cache
-	Providers      *Providers
-	CronInterval   time.Duration
+	KEBClient       *keb.Client
+	EDPClient       *edp.Client
+	Queue           workqueue.DelayingInterface
+	GardenerClient  dynamic.ResourceInterface
+	SecretClient    dynamic.ResourceInterface
+	Logger          *logrus.Logger
+	Cache           *cache.Cache
+	Providers       *Providers
+	ScrapeInterval  time.Duration
+	WorkersPoolSize int
 }
 
 type Result struct {
@@ -40,84 +42,59 @@ type Result struct {
 	Err    error
 }
 
-var CustomBackoff = wait.Backoff{
-	Steps:    4,
-	Duration: 10 * time.Second,
-	Factor:   5.0,
-	Jitter:   0.1,
-}
-
-func (p Process) getRuntimes() (*kebruntime.RuntimesPage, error) {
-
-	var resp *http.Response
-	var err error
-	err = retry.OnError(CustomBackoff, func(err error) bool {
-		if err != nil {
-			return true
-		}
-		return false
-	}, func() (err error) {
-		resp, err = p.KEBClient.Do(p.KEBReq)
-		if err != nil {
-			p.Logger.Warnf("will be retried: failed while getting runtimes from KEB: %v", err)
-		}
-		return
-	})
-
-	if err != nil {
-		p.Logger.Errorf("failed to get runtimes from KEB: %v", err)
-		return nil, errors.Wrapf(err, "failed to get runtimes from KEB")
-	}
-
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		p.Logger.Errorf("failed to read body: %v", err)
-		return nil, err
-	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
-	runtimesPage := new(kebruntime.RuntimesPage)
-	if err := json.Unmarshal(body, runtimesPage); err != nil {
-		return nil, errors.Wrapf(err, "failed to unmarshal runtimes response")
-	}
-	return runtimesPage, nil
-}
-
-func (p Process) scrapeGardenerCluster(wg *sync.WaitGroup, shootName string) {
-	defer wg.Done()
+func (p Process) generateMetricFor(subAccountID string) (metric *edp.ConsumptionMetrics, kubeConfig string, shootName string, err error) {
 	ctx := context.Background()
 
-	// Get shoot CR
-	shoot, err := getShoot(ctx, shootName, p.GardenerClient)
-	if err != nil {
-		p.ResultChan <- getErrResult(err, "failed to get shoot", shootName)
+	obj, isFound := p.Cache.Get(subAccountID)
+	if !isFound {
+		err = fmt.Errorf("subAccountID was not found in cache")
 		return
 	}
-	tenant := shoot.Labels["subaccount"]
+	var engineInfo EngineInfo
+	var ok bool
+	if engineInfo, ok = obj.(EngineInfo); !ok {
+		err = fmt.Errorf("bad item from cache")
+		return
+	}
 
-	// Get shoot kubeconfig secret
-	secret, err := getSecretForShoot(ctx, shootName, p.SecretClient)
+	p.Logger.Infof("engine Info found: %+v", engineInfo)
+
+	shootName = engineInfo.shootName
+
+	if engineInfo.kubeConfig == "" {
+		// Get shoot kubeconfig secret
+		var secret *corev1.Secret
+		secret, err = getSecretForShoot(ctx, shootName, p.SecretClient)
+		if err != nil {
+			return
+		}
+		engineInfo.kubeConfig = string(secret.Data["kubeconfig"])
+	}
+
+	// Get shoot CR
+	var shoot *gardenerv1beta1.Shoot
+	shoot, err = getShoot(ctx, shootName, p.GardenerClient)
 	if err != nil {
-		p.ResultChan <- getErrResult(err, "failed to get secret for shoot: %v", shootName)
+		return
+	}
+
+	// Get nodes dynamic client
+	var nodeClient dynamic.Interface
+	nodeClient, err = getDynamicClientForShoot(engineInfo.kubeConfig)
+	if err != nil {
 		return
 	}
 
 	// Get nodes
-	nodeClient, err := getDynamicClientForShoot(string(secret.Data["kubeconfig"]))
+	var nodes *corev1.NodeList
+	nodes, err = getNodes(ctx, nodeClient)
 	if err != nil {
-		p.ResultChan <- getErrResult(err, "failed to generate dynamic client for nodes from shoot: %s", shootName)
-		return
-	}
-	nodes, err := getNodes(ctx, nodeClient)
-	if err != nil {
-		p.ResultChan <- getErrResult(err, "failed to get nodes list from shoot: %s", shootName)
 		return
 	}
 
 	p.Logger.Debugf("nodes count: %v", len(nodes.Items))
 	if len(nodes.Items) == 0 {
-		p.ResultChan <- getErrResult(fmt.Errorf("number of nodes returned is 0, hence cannot process"), "", shootName)
+		err = fmt.Errorf("no nodes to process")
 		return
 	}
 
@@ -130,133 +107,217 @@ func (p Process) scrapeGardenerCluster(wg *sync.WaitGroup, shootName string) {
 		shoot: shoot,
 	}
 	// Parse information and generate event stream
-	eventStream := input.Parse(shoot.Name, tenant, p.Providers)
-	p.ResultChan <- Result{
-		Output: eventStream,
-		Err:    nil,
-	}
-	p.Logger.Debugf("---- end of processing --- for shoot: %s", shootName)
+	defer func() {
+		p.Logger.Debugf("---- end of processing --- for shoot: %s", shootName)
+	}()
+	metric, err = input.Parse(p.Providers)
+
+	return
 }
 
-func (p Process) getOldMetric(result Result) ([]byte, error) {
-
-	var oldEventStreamData []byte
+func (p Process) getOldMetric(subAccountID string) ([]byte, error) {
+	var oldMetricData []byte
 	var err error
-	oldEventStream, found := p.Cache.Get(result.Output.ShootName)
+	oldEngineInfoObj, found := p.Cache.Get(subAccountID)
 	if !found {
-		notFoundErr := fmt.Errorf("failed to get an old event stream for shoot: %s", result.Output.ShootName)
+		notFoundErr := fmt.Errorf("subAccountID: %s not found", subAccountID)
 		p.Logger.Error(notFoundErr)
 		return []byte{}, notFoundErr
 	}
-	if oldData, ok := oldEventStream.(edp.ConsumptionMetrics); ok {
-		oldEventStreamData, err = json.Marshal(oldData)
+
+	if oldEngineInfo, ok := oldEngineInfoObj.(EngineInfo); ok {
+		if oldEngineInfo.metric == nil {
+			notFoundErr := fmt.Errorf("old metrics for subAccountID: %s not found", subAccountID)
+			p.Logger.Error(notFoundErr)
+			return []byte{}, notFoundErr
+		}
+		oldMetricData, err = json.Marshal(*oldEngineInfo.metric)
 		if err != nil {
 			return []byte{}, err
 		}
 	}
-	return oldEventStreamData, nil
+	return oldMetricData, nil
 }
 
-func (p Process) addDataToCache(result Result) error {
-	alreadyExistsErr := fmt.Errorf("Item %s already exists", result.Output.ShootName)
-	err := p.Cache.Add(result.Output.ShootName, result.Output.Metric, 60*time.Minute)
+// pollKEBForRuntimes polls KEB for runtimes information
+func (p Process) pollKEBForRuntimes() {
+	kebReq, err := p.KEBClient.NewRequest()
 	if err != nil {
-		if err.Error() == alreadyExistsErr.Error() {
-			p.Cache.Delete(result.Output.ShootName)
-			err := p.Cache.Add(result.Output.ShootName, result.Output.Metric, 60*time.Minute)
-			if err != nil {
-				return err
-			}
-		}
+		p.Logger.Fatalf("failed to create a new request for KEB: %v", err)
 	}
-	return nil
+	for {
+		runtimesPage, err := p.KEBClient.GetRuntimes(kebReq)
+		if err != nil {
+			p.Logger.Errorf("failed to get runtimes from KEB: %v", err)
+			time.Sleep(p.KEBClient.Config.PollWaitDuration)
+			continue
+		}
+		p.Logger.Debugf("num of runtimes are: %d", runtimesPage.Count)
+		p.populateCacheAndQueue(runtimesPage)
+		// TODO remove me "TESTING PURPOSES"
+		_ = p.Cache.Add("39ba9a66-2c1a-4fe4-a28e-6e5db434084e", EngineInfo{
+			subAccountID: "39ba9a66-2c1a-4fe4-a28e-6e5db434084e",
+			shootName:    "c-69e1cca",
+			kubeConfig:   "",
+			metric:       nil,
+		}, cache.NoExpiration)
+		// ------------------------------------
+		p.Logger.Infof("waiting to poll KEB again after %v....", p.KEBClient.Config.PollWaitDuration)
+		time.Sleep(p.KEBClient.Config.PollWaitDuration)
+	}
 }
 
-func (p Process) afterProcess() {
+// Start runs the whole of collection and sending metrics
+func (p Process) Start() {
 
-	for result := range p.ResultChan {
-		var dataToBeSent []byte
-		var err error
-		if result.Err != nil {
-			// Failed to generate metrics hence send the previous data from the store(if any)
-			p.Logger.Errorf("processing failed for shoot: %s err: %v", result.Output.ShootName, result.Err)
-			dataToBeSent, err = p.getOldMetric(result)
+	var wg sync.WaitGroup
+	go func() {
+		p.pollKEBForRuntimes()
+	}()
+
+	for i := 0; i < p.WorkersPoolSize; i++ {
+		go func() {
+			defer wg.Done()
+			p.Execute()
+			p.Logger.Infof("########  Worker exits #######")
+		}()
+	}
+	wg.Wait()
+}
+
+// Execute is executed by each worker to process an entry from the queue
+func (p Process) Execute() {
+
+	for {
+		var payload, oldMetric []byte
+		// Pick up a subAccountID to process from queue
+		subAccountIDObj, isShuttingDown := p.Queue.Get()
+		if isShuttingDown {
+			//p.Cleanup()
+			return
+		}
+		subAccountID := fmt.Sprintf("%v", subAccountIDObj)
+
+		if subAccountID == "" {
+			p.Logger.Warn("cannot work with empty subAccountID")
+			continue
+		}
+
+		p.Logger.Infof("Subaccid: %v is fetched from queue", subAccountIDObj)
+		metric, kubeconfig, shootName, err := p.generateMetricFor(subAccountID)
+		if err != nil {
+			p.Logger.Errorf("failed to generate new metric for subaccountID: %v, err: %v", subAccountID, err)
+			// Get old data
+			oldMetric, err = p.getOldMetric(subAccountID)
 			if err != nil {
+				p.Logger.Errorf("failed to getOldMetric for subaccountID: %s, err: %v", subAccountID, err)
 				// Nothing to do
 				continue
 			}
-			// Log the old metric which will sent to EDP
-			p.Logger.Errorf("sending an old eventstream for shoot: %s, %s", result.Output.ShootName, string(dataToBeSent))
-		} else {
-			// When metric was successfully generated
-			dataToBeSent, err = json.Marshal(result.Output.Metric)
+		}
+
+		if len(oldMetric) == 0 {
+			payload, err = json.Marshal(metric)
 			if err != nil {
-				dataToBeSent, err = p.getOldMetric(result)
+				// Get old data
+				oldMetric, err = p.getOldMetric(subAccountID)
 				if err != nil {
+					p.Logger.Errorf("failed to get old metric: %v", err)
 					// Nothing to do
 					continue
 				}
 			}
+		} else {
+			payload = oldMetric
 		}
 
-		tenant := result.Output.Tenant
-		// retry may make sense
-		edpRequest, err := p.EDPClient.NewRequest(tenant, dataToBeSent)
+		// Note: EDP refers SubAccountID as tenant
+		err = p.sendEventStreamToEDP(subAccountID, payload)
 		if err != nil {
-			p.Logger.Errorf("failed to create a new event stream data request: %+v for shoot: %s", err, result.Output.ShootName)
+			// Nothing to do further hence continue
+			p.Logger.Errorf("failed to send metric to EDP for subAccountID: %s, event-stream: %s", subAccountID, string(payload))
 			continue
 		}
-		resp, err := p.EDPClient.Send(edpRequest)
-		if err != nil {
-			p.Logger.Errorf("failed to send event stream data: %+v for shoot: %s", err, result.Output.ShootName)
-			continue
-		}
-		if !isSuccess(resp.StatusCode) {
-			p.Logger.Errorf("failed to send event stream data: %+v for shoot: %s, with HTTP status code: %d", result.Err, result.Output.ShootName, resp.StatusCode)
-			continue
-		}
+		p.Logger.Infof("successfully sent event stream for subaccountID: %s, shoot: %s", subAccountID, shootName)
 
-		p.Logger.Infof("successfully sent event stream for shoot: %s", result.Output.ShootName)
-		// If no err then save it in the store
-		if result.Err == nil {
-			err = p.addDataToCache(result)
-			if err != nil {
-				p.Logger.Errorf("failed to save data to cache: %v for shoot: %s", err, result.Output.ShootName)
-				return
+		if len(oldMetric) == 0 {
+			newEngineInfo := EngineInfo{
+				subAccountID: subAccountID,
+				shootName:    shootName,
+				kubeConfig:   kubeconfig,
+				metric:       metric,
+			}
+			p.Cache.Set(newEngineInfo.subAccountID, newEngineInfo, cache.NoExpiration)
+			p.Queue.AddAfter(subAccountID, p.ScrapeInterval)
+			p.Logger.Infof("Length of queue: %d", p.Queue.Len())
+			p.Logger.Debugf("successfully saved metric and requed for subAccountID %s, %s", newEngineInfo.subAccountID, string(payload))
+		}
+	}
+}
+
+func (p Process) sendEventStreamToEDP(tenant string, payload []byte) error {
+	p.Logger.Infof("inside sendEventStreamToEDP: tenant: %s payload: %s", tenant, string(payload))
+	edpRequest, err := p.EDPClient.NewRequest(tenant, payload)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create a new request for EDP")
+	}
+
+	resp, err := p.EDPClient.Send(edpRequest)
+	if err != nil {
+		return errors.Wrapf(err, "failed to send event-stream to EDP")
+	}
+
+	if !isSuccess(resp.StatusCode) {
+		return fmt.Errorf("failed to send event-stream to EDP as it returned HTTP: %d", resp.StatusCode)
+	}
+	return nil
+}
+
+type EngineInfo struct {
+	subAccountID string
+	shootName    string
+	kubeConfig   string
+	metric       *edp.ConsumptionMetrics
+}
+
+func isClusterTrackable(runtime *kebruntime.RuntimeDTO) bool {
+	if runtime.Status.Provisioning != nil &&
+		runtime.Status.Provisioning.State == "succeeded" &&
+		runtime.Status.Deprovisioning == nil {
+		return true
+	}
+	return false
+}
+
+// populateCacheAndQueue populates Cache and Queue with new runtimes and deletes the runtimes which should not be tracked
+func (p Process) populateCacheAndQueue(runtimes *kebruntime.RuntimesPage) {
+
+	for _, runtime := range runtimes.Data {
+		_, isFound := p.Cache.Get(runtime.SubAccountID)
+		if isClusterTrackable(&runtime) {
+			if !isFound {
+				engineInfo := EngineInfo{
+					subAccountID: runtime.SubAccountID,
+					shootName:    runtime.ShootName,
+					kubeConfig:   "",
+					metric:       nil,
+				}
+				if runtime.SubAccountID != "" {
+					err := p.Cache.Add(runtime.SubAccountID, engineInfo, cache.NoExpiration)
+					if err != nil {
+						p.Logger.Errorf("failed to add subAccountID: %v to cache hence skipping queueing it", err)
+						continue
+					}
+					p.Queue.Add(runtime.SubAccountID)
+					p.Logger.Infof("Queued and added to cache: %v", runtime.SubAccountID)
+				}
+			}
+		} else {
+			if isFound {
+				p.Logger.Infof("Deleting subAccountID: %v", runtime.SubAccountID)
+				p.Cache.Delete(runtime.SubAccountID)
 			}
 		}
-		p.Logger.Debugf("successfully saved metric for shoot %s, %s", result.Output.ShootName, string(dataToBeSent))
 	}
-}
-
-func (p Process) AfterProcess() {
-	p.afterProcess()
-}
-
-func (p Process) runCron() {
-	for {
-		runtimesPage, err := p.getRuntimes()
-		if err != nil {
-			p.Logger.Errorf("failed to get runtimes from KEB: %v", err)
-			continue
-		}
-		p.Logger.Debugf("num of runtimes are: %d", runtimesPage.Count)
-		filteredRuntimes := filterRuntimes(*runtimesPage)
-		p.Logger.Debugf("after filtration: num of runtimes are: %d", filteredRuntimes.Count)
-
-		// Spawn workers to do the job(data processing and take it to EDP) and communicate back to the main routine once done
-		var wg sync.WaitGroup
-		wg.Add(len(filteredRuntimes.Data))
-		for _, skrRuntime := range filteredRuntimes.Data {
-			go p.scrapeGardenerCluster(&wg, skrRuntime.ShootName)
-		}
-		wg.Wait()
-
-		p.Logger.Infof("### next execution will start in %v.......", p.CronInterval)
-		time.Sleep(p.CronInterval)
-	}
-}
-
-func (p Process) RunCron() {
-	p.runCron()
+	p.Logger.Infof("length of the cache: %d", p.Cache.ItemCount())
 }

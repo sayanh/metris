@@ -29,8 +29,8 @@ type Feature struct {
 }
 
 func (p Providers) GetFeatures(cloudProvider, vmType string) (f *Features) {
-	if azVm, ok := p.Data[cloudProvider].(*Vm); ok {
-		spec := *azVm.VmSpecs
+	if providerVm, ok := p.Data[cloudProvider].(*Vm); ok {
+		spec := *providerVm.VmSpecs
 		if features, ok := spec[vmType].(*Features); ok {
 			f = features
 		}
@@ -38,6 +38,7 @@ func (p Providers) GetFeatures(cloudProvider, vmType string) (f *Features) {
 	return
 }
 
+// LoadPublicCloudSpecs loads string data to Providers object from an env var
 func LoadPublicCloudSpecs(cfg *env.Config) (*Providers, error) {
 	if cfg.PublicCloudSpecs == "" {
 		return nil, fmt.Errorf("public cloud specification is not configured")

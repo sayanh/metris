@@ -19,8 +19,6 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	gardenerv1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
-	kebruntime "github.com/kyma-project/control-plane/components/kyma-environment-broker/common/runtime"
-	"github.com/pkg/errors"
 )
 
 var (
@@ -31,20 +29,21 @@ var (
 	}
 )
 
-func filterRuntimes(runtimesPage kebruntime.RuntimesPage) *kebruntime.RuntimesPage {
-
-	filteredRuntimes := new(kebruntime.RuntimesPage)
-	for _, runtime := range runtimesPage.Data {
-		if runtime.Status.Provisioning.State == "succeeded" {
-			filteredRuntimes.Data = append(filteredRuntimes.Data, runtime)
-		}
-	}
-	filteredRuntimes.Count = len(filteredRuntimes.Data)
-	filteredRuntimes.TotalCount = len(filteredRuntimes.Data)
-
-	return filteredRuntimes
-
-}
+//func filterRuntimes(runtimesPage kebruntime.RuntimesPage) *kebruntime.RuntimesPage {
+//
+//	// TODO check for deprovisioning as well
+//	filteredRuntimes := new(kebruntime.RuntimesPage)
+//	for _, runtime := range runtimesPage.Data {
+//		if runtime.Status.Provisioning.State == "succeeded" {
+//			filteredRuntimes.Data = append(filteredRuntimes.Data, runtime)
+//		}
+//	}
+//	filteredRuntimes.Count = len(filteredRuntimes.Data)
+//	filteredRuntimes.TotalCount = len(filteredRuntimes.Data)
+//
+//	return filteredRuntimes
+//
+//}
 
 func isSuccess(status int) bool {
 	if status >= http.StatusOK && status < http.StatusMultipleChoices {
@@ -92,14 +91,15 @@ func getDynamicClientForShoot(kubeconfig string) (dynamic.Interface, error) {
 	dynamicClient, err := dynamic.NewForConfig(restClientConfig)
 	return dynamicClient, nil
 }
-func getErrResult(err error, msg, shootName string) Result {
-	return Result{
-		Output: EventStream{
-			ShootName: shootName,
-		},
-		Err: errors.Wrapf(err, msg),
-	}
-}
+
+//func getErrResult(err error, msg, shootName string) Result {
+//	return Result{
+//		Output: EventStream{
+//			ShootName: shootName,
+//		},
+//		Err: errors.Wrapf(err, msg),
+//	}
+//}
 
 func getSecretForShoot(ctx context.Context, shootName string, secretClient dynamic.ResourceInterface) (*corev1.Secret, error) {
 	shootKubeconfigName := fmt.Sprintf("%s.kubeconfig", shootName)

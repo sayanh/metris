@@ -32,6 +32,8 @@ spec:
               configMapKeyRef:
                 name: public-cloud-specs
                 key: providers
+          - name: KEB_URL
+            value: http://kcp-kyma-environment-broker.kcp-system/runtimes
           - name: EDP_URL
             value: http://edp-mock.kcp-system:8080
           - name: EDP_TOKEN

@@ -1,6 +1,7 @@
 package process
 
 import (
+	"fmt"
 	"strings"
 
 	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
@@ -9,13 +10,12 @@ import (
 )
 
 const (
-	nodeLabel = "beta.kubernetes.io/instance-type"
+	nodeInstanceTypeLabel = "node.kubernetes.io/instance-type"
 )
 
 type EventStream struct {
-	ShootName string
-	Metric    edp.ConsumptionMetrics
-	Tenant    string
+	Metric     edp.ConsumptionMetrics
+	KubeConfig string
 }
 
 type Input struct {
@@ -28,7 +28,7 @@ type NodeInfo struct {
 	memory int
 }
 
-func (inp Input) Parse(shootName, tenant string, providers *Providers) EventStream {
+func (inp Input) Parse(providers *Providers) (*edp.ConsumptionMetrics, error) {
 
 	metric := new(edp.ConsumptionMetrics)
 	provisionedCPUs := 0
@@ -36,9 +36,12 @@ func (inp Input) Parse(shootName, tenant string, providers *Providers) EventStre
 	providerType := inp.shoot.Spec.Provider.Type
 	vmTypes := make(map[string]int)
 	for _, node := range inp.nodes.Items {
-		nodeType := node.Labels[nodeLabel]
+		nodeType := node.Labels[nodeInstanceTypeLabel]
 		nodeType = strings.ToLower(nodeType)
 		vmFeatures := providers.GetFeatures(providerType, nodeType)
+		if vmFeatures == nil {
+			return nil, fmt.Errorf("providerType : %s and nodeType: %s does not exist in the map", providerType, nodeType)
+		}
 		provisionedCPUs += vmFeatures.CpuCores
 		provisionedMemory += vmFeatures.Memory
 		vmTypes[nodeType] += 1
@@ -53,10 +56,5 @@ func (inp Input) Parse(shootName, tenant string, providers *Providers) EventStre
 		})
 	}
 
-	eventStream := EventStream{
-		ShootName: shootName,
-		Metric:    *metric,
-		Tenant:    tenant,
-	}
-	return eventStream
+	return metric, nil
 }

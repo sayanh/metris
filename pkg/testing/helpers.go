@@ -7,6 +7,11 @@ import (
 	"net/http/httptest"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+
+	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
+	metaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/onsi/gomega"
 
 	"github.com/gorilla/mux"
@@ -67,4 +72,96 @@ func StartTestServer(path string, testHandler http.HandlerFunc, g gomega.Gomega)
 	}, timeout).Should(gomega.Equal(http.StatusOK))
 
 	return srv
+}
+
+type NewShootOpts func(shoot *gardencorev1beta1.Shoot)
+
+func GetShoot(name string, opts ...NewShootOpts) *gardencorev1beta1.Shoot {
+	shoot := &gardencorev1beta1.Shoot{
+		ObjectMeta: metaV1.ObjectMeta{
+			Name: "name",
+		},
+		Spec: gardencorev1beta1.ShootSpec{},
+	}
+	for _, opt := range opts {
+		opt(shoot)
+	}
+	return shoot
+}
+
+func WithAzureProviderAndStandard_D8_v3VMs(shoot *gardencorev1beta1.Shoot) {
+	shoot.Spec.Provider = gardencorev1beta1.Provider{
+		Type:                 "azure",
+		ControlPlaneConfig:   nil,
+		InfrastructureConfig: nil,
+		Workers: []gardencorev1beta1.Worker{
+			{
+				Name: "cpu-worker-0",
+				Machine: gardencorev1beta1.Machine{
+					Type: "Standard_D8_v3",
+					Image: &gardencorev1beta1.ShootMachineImage{
+						Name: "gardenlinux",
+					},
+				},
+			},
+		},
+	}
+}
+
+func WithAzureProviderAndFooVMType(shoot *gardencorev1beta1.Shoot) {
+	shoot.Spec.Provider = gardencorev1beta1.Provider{
+		Type:                 "azure",
+		ControlPlaneConfig:   nil,
+		InfrastructureConfig: nil,
+		Workers: []gardencorev1beta1.Worker{
+			{
+				Name: "cpu-worker-0",
+				Machine: gardencorev1beta1.Machine{
+					Type: "Standard_Foo",
+					Image: &gardencorev1beta1.ShootMachineImage{
+						Name: "gardenlinux",
+					},
+				},
+			},
+		},
+	}
+}
+
+func Get2Nodes() *corev1.NodeList {
+	node1 := GetNode("node1", "Standard_D8_v3")
+	node2 := GetNode("node2", "Standard_D8_v3")
+	return &corev1.NodeList{
+		Items: []corev1.Node{node1, node2},
+	}
+}
+
+func Get3NodesWithStandardD8v3VMType() *corev1.NodeList {
+	node1 := GetNode("node1", "Standard_D8_v3")
+	node2 := GetNode("node2", "Standard_D8_v3")
+	node3 := GetNode("node3", "Standard_D8_v3")
+	return &corev1.NodeList{
+		Items: []corev1.Node{node1, node2, node3},
+	}
+}
+
+func Get3NodesWithFooVMType() *corev1.NodeList {
+	node1 := GetNode("node1", "foo")
+	node2 := GetNode("node2", "foo")
+	node3 := GetNode("node3", "foo")
+	return &corev1.NodeList{
+		Items: []corev1.Node{node1, node2, node3},
+	}
+}
+
+func GetNode(name, vmType string) corev1.Node {
+	return corev1.Node{
+		ObjectMeta: metaV1.ObjectMeta{
+			Name: name,
+			Labels: map[string]string{
+				"node.kubernetes.io/instance-type": vmType,
+				"node.kubernetes.io/role":          "node",
+			},
+		},
+		Spec: corev1.NodeSpec{},
+	}
 }

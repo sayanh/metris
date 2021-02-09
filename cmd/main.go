@@ -6,7 +6,10 @@ import (
 	"net/http/pprof"
 	"time"
 
+	"github.com/kyma-incubator/metris/pkg/keb"
+
 	"github.com/kyma-incubator/metris/pkg/edp"
+	"k8s.io/client-go/util/workqueue"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
@@ -24,7 +27,6 @@ import (
 	"github.com/kelseyhightower/envconfig"
 	"github.com/kyma-incubator/metris/env"
 	"github.com/kyma-incubator/metris/options"
-	"github.com/kyma-incubator/metris/pkg/process"
 	gocache "github.com/patrickmn/go-cache"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
@@ -60,10 +62,8 @@ func main() {
 		log.Fatalf("failed to load env config: %s", err)
 	}
 
-	edpConfig := new(edp.Config)
-	if err := envconfig.Process("", edpConfig); err != nil {
-		log.Fatalf("failed to load EDP config: %s", err)
-	}
+	log.Infof("log level: %s", log.Level.String())
+
 	// Load public cloud specs
 	publicCloudSpecs, err := metrisprocess.LoadPublicCloudSpecs(cfg)
 	if err != nil {
@@ -82,37 +82,40 @@ func main() {
 	shootClient := dynClient.Resource(shootGVR).Namespace(opts.GardenerNamespace)
 	secretClient := dynClient.Resource(secretGVR).Namespace(opts.GardenerNamespace)
 
-	// Create an HTTP client to talk to KEB
-	kebReq := &http.Request{
-		Method: http.MethodGet,
-		URL:    opts.KEBRuntimeEndpoint,
+	// Create a client for KEB communication
+	kebConfig := new(keb.Config)
+	if err := envconfig.Process("", kebConfig); err != nil {
+		log.Fatalf("failed to load KEB config: %s", err)
 	}
-
-	kebClient := http.DefaultClient
-	resultChan := make(chan process.Result)
+	kebClient := keb.NewClient(kebConfig, log)
+	log.Infof("keb config: %v", kebConfig)
 	// Creating cache with no expiration
 	cache := gocache.New(gocache.NoExpiration, 0*time.Second)
 
+	// Creating EDP client
+	edpConfig := new(edp.Config)
+	if err := envconfig.Process("", edpConfig); err != nil {
+		log.Fatalf("failed to load EDP config: %s", err)
+	}
 	edpClient := edp.NewClient(edpConfig)
 
+	queue := workqueue.NewDelayingQueue()
+
 	metrisProcess := metrisprocess.Process{
-		KEBClient:      kebClient,
-		KEBReq:         kebReq,
-		GardenerClient: shootClient,
-		SecretClient:   secretClient,
-		EDPClient:      edpClient,
-		Logger:         log,
-		Providers:      publicCloudSpecs,
-		Cache:          cache,
-		ResultChan:     resultChan,
-		CronInterval:   opts.CronInterval,
+		KEBClient:       kebClient,
+		GardenerClient:  shootClient,
+		SecretClient:    secretClient,
+		EDPClient:       edpClient,
+		Logger:          log,
+		Providers:       publicCloudSpecs,
+		Cache:           cache,
+		ScrapeInterval:  opts.ScrapeInterval,
+		Queue:           queue,
+		WorkersPoolSize: opts.WorkerPoolSize,
 	}
 
-	// Start after processing go-routine
-	go metrisProcess.AfterProcess()
-
-	// Start a cron for scrapping gardener and shoot clusters
-	go metrisProcess.RunCron()
+	// Start execution
+	go metrisProcess.Start()
 
 	// add debug service.
 	if opts.DebugPort > 0 {

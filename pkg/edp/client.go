@@ -80,6 +80,8 @@ func (eClient Client) Send(req *http.Request) (*http.Response, error) {
 		resp, err = eClient.HttpClient.Do(req)
 		if err != nil {
 			eClient.Logger.Warnf("will be retried: failed to send event stream to EDP: %v", err)
+			eClient.Logger.Warnf("req: %v", req)
+			return
 		}
 
 		if resp.StatusCode != http.StatusCreated {
