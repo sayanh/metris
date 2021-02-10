@@ -4,15 +4,12 @@ import (
 	"context"
 	"testing"
 
-	metaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	corev1 "k8s.io/api/core/v1"
+	metaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/kyma-incubator/metris/pkg/gardener/commons"
 	metristesting "github.com/kyma-incubator/metris/pkg/testing"
 	"github.com/onsi/gomega"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 )
 
@@ -45,16 +42,8 @@ func NewFakeClient(nodeList *corev1.NodeList) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	unstructuredMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(nodeList)
-	if err != nil {
-		return nil, err
-	}
-	nodeListUnstructured := &unstructured.UnstructuredList{Object: unstructuredMap}
-	nodeListUnstructured.SetUnstructuredContent(unstructuredMap)
-	nodeListUnstructured.SetGroupVersionKind(GroupVersionKind())
-	nodeListUnstructured.SetKind("NodeList")
-	dynamicClient := dynamicfake.NewSimpleDynamicClient(scheme, nodeListUnstructured)
-	nsResourceClient := dynamicClient.Resource(GroupVersionResource())
 
+	dynamicClient := dynamicfake.NewSimpleDynamicClient(scheme, nodeList)
+	nsResourceClient := dynamicClient.Resource(GroupVersionResource())
 	return &Client{Resource: nsResourceClient}, nil
 }

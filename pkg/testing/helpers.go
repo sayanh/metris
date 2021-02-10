@@ -175,6 +175,5 @@ func GetNode(name, vmType string) corev1.Node {
 				"node.kubernetes.io/role":          "node",
 			},
 		},
-		Spec: corev1.NodeSpec{},
 	}
 }
