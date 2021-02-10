@@ -13,7 +13,7 @@ import (
 )
 
 type Client struct {
-	lister dynamic.Interface
+	Resource dynamic.NamespaceableResourceInterface
 }
 
 func NewClient(kubeconfig string) (*Client, error) {
@@ -22,21 +22,16 @@ func NewClient(kubeconfig string) (*Client, error) {
 		return nil, err
 	}
 	dynamicClient, err := dynamic.NewForConfig(restClientConfig)
-	return &Client{lister: dynamicClient}, nil
-}
-
-func GroupVersionResource() schema.GroupVersionResource {
-	return schema.GroupVersionResource{
-		Version:  corev1.SchemeGroupVersion.Version,
-		Group:    corev1.SchemeGroupVersion.Group,
-		Resource: "nodes",
+	if err != nil {
+		return nil, err
 	}
+	nsResourceClient := dynamicClient.Resource(GroupVersionResource())
+	return &Client{Resource: nsResourceClient}, nil
 }
 
 func (c Client) List(ctx context.Context) (*corev1.NodeList, error) {
 
-	nodeClient := c.lister.Resource(GroupVersionResource())
-	nodesUnstructured, err := nodeClient.List(ctx, metaV1.ListOptions{})
+	nodesUnstructured, err := c.Resource.Namespace(corev1.NamespaceAll).List(ctx, metaV1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -54,4 +49,20 @@ func convertRuntimeListToNodeList(unstructuredNodesList *unstructured.Unstructur
 		return nil, err
 	}
 	return nodeList, nil
+}
+
+func GroupVersionResource() schema.GroupVersionResource {
+	return schema.GroupVersionResource{
+		Version:  corev1.SchemeGroupVersion.Version,
+		Group:    corev1.SchemeGroupVersion.Group,
+		Resource: "nodes",
+	}
+}
+
+func GroupVersionKind() schema.GroupVersionKind {
+	return schema.GroupVersionKind{
+		Version: corev1.SchemeGroupVersion.Version,
+		Group:   corev1.SchemeGroupVersion.Group,
+		Kind:    "NodeList",
+	}
 }

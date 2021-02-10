@@ -14,7 +14,7 @@ import (
 	metriscache "github.com/kyma-incubator/metris/pkg/cache"
 	gardenersecret "github.com/kyma-incubator/metris/pkg/gardener/secret"
 	gardenershoot "github.com/kyma-incubator/metris/pkg/gardener/shoot"
-	skrnode "github.com/kyma-incubator/metris/pkg/skr_shoot/node"
+	skrnode "github.com/kyma-incubator/metris/pkg/skr/node"
 
 	corev1 "k8s.io/api/core/v1"
 

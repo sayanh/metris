@@ -78,8 +78,13 @@ type NewShootOpts func(shoot *gardencorev1beta1.Shoot)
 
 func GetShoot(name string, opts ...NewShootOpts) *gardencorev1beta1.Shoot {
 	shoot := &gardencorev1beta1.Shoot{
+		TypeMeta: metaV1.TypeMeta{
+			Kind:       "Shoot",
+			APIVersion: "core.gardener.cloud/v1beta1",
+		},
 		ObjectMeta: metaV1.ObjectMeta{
-			Name: "name",
+			Name:      name,
+			Namespace: "default",
 		},
 		Spec: gardencorev1beta1.ShootSpec{},
 	}
@@ -140,6 +145,10 @@ func Get3NodesWithStandardD8v3VMType() *corev1.NodeList {
 	node2 := GetNode("node2", "Standard_D8_v3")
 	node3 := GetNode("node3", "Standard_D8_v3")
 	return &corev1.NodeList{
+		TypeMeta: metaV1.TypeMeta{
+			Kind:       "NodeList",
+			APIVersion: "v1",
+		},
 		Items: []corev1.Node{node1, node2, node3},
 	}
 }
@@ -155,6 +164,10 @@ func Get3NodesWithFooVMType() *corev1.NodeList {
 
 func GetNode(name, vmType string) corev1.Node {
 	return corev1.Node{
+		TypeMeta: metaV1.TypeMeta{
+			Kind:       "Node",
+			APIVersion: "v1",
+		},
 		ObjectMeta: metaV1.ObjectMeta{
 			Name: name,
 			Labels: map[string]string{

@@ -34,23 +34,23 @@ const (
 
 func main() {
 	opts := options.ParseArgs()
+
 	log := logrus.New()
 	log.Level = opts.LogLevel
-
 	log.Printf("Starting application with options: ", opts.String())
+
 	cfg := new(env.Config)
 	if err := envconfig.Process("", cfg); err != nil {
 		log.Fatalf("failed to load env config: %s", err)
 	}
-
-	log.Infof("log level: %s", log.Level.String())
+	log.Debugf("log level: %s", log.Level.String())
 
 	// Load public cloud specs
 	publicCloudSpecs, err := metrisprocess.LoadPublicCloudSpecs(cfg)
 	if err != nil {
 		log.Fatalf("failed to load public cloud specs: %v", err)
 	}
-	log.Infof("public cloud spec: %v", publicCloudSpecs)
+	log.Debugf("public cloud spec: %v", publicCloudSpecs)
 
 	secretClient, err := gardenersecret.NewClient(opts)
 	if err != nil {

@@ -17,32 +17,24 @@ import (
 )
 
 type Client struct {
-	resourceClient dynamic.ResourceInterface
+	ResourceClient dynamic.ResourceInterface
 }
 
 func NewClient(opts *options.Options) (*Client, error) {
-	k8sConfig := gardenercommons.GetGardenerKubeconfig(opts)
-	client, err := k8sConfig.ClientConfig()
+	k8sConfig := gardenercommons.GetGardenerKubeconfig(opts.GardenerSecretPath)
+	clientCfg, err := k8sConfig.ClientConfig()
 	if err != nil {
-		return nil, nil
+		return nil, err
 	}
-	restConfig := dynamic.ConfigFor(client)
+	restConfig := dynamic.ConfigFor(clientCfg)
 	dynClient := dynamic.NewForConfigOrDie(restConfig)
 	resourceClient := dynClient.Resource(GroupVersionResource()).Namespace(opts.GardenerNamespace)
-	return &Client{resourceClient: resourceClient}, nil
-}
-
-func GroupVersionResource() schema.GroupVersionResource {
-	return schema.GroupVersionResource{
-		Version:  corev1.SchemeGroupVersion.Version,
-		Group:    corev1.SchemeGroupVersion.Group,
-		Resource: "secrets",
-	}
+	return &Client{ResourceClient: resourceClient}, nil
 }
 
 func (c Client) Get(ctx context.Context, shootName string) (*corev1.Secret, error) {
 	shootKubeconfigName := fmt.Sprintf("%s.kubeconfig", shootName)
-	unstructuredSecret, err := c.resourceClient.Get(ctx, shootKubeconfigName, metaV1.GetOptions{})
+	unstructuredSecret, err := c.ResourceClient.Get(ctx, shootKubeconfigName, metaV1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -56,4 +48,20 @@ func convertRuntimeObjToSecret(unstructuredSecret *unstructured.Unstructured) (*
 		return nil, err
 	}
 	return secret, nil
+}
+
+func GroupVersionResource() schema.GroupVersionResource {
+	return schema.GroupVersionResource{
+		Version:  corev1.SchemeGroupVersion.Version,
+		Group:    corev1.SchemeGroupVersion.Group,
+		Resource: "secrets",
+	}
+}
+
+func GroupVersionKind() schema.GroupVersionKind {
+	return schema.GroupVersionKind{
+		Version: corev1.SchemeGroupVersion.Version,
+		Group:   corev1.SchemeGroupVersion.Group,
+		Kind:    "Secret",
+	}
 }

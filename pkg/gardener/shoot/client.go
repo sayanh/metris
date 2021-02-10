@@ -15,11 +15,11 @@ import (
 )
 
 type Client struct {
-	resourceClient dynamic.ResourceInterface
+	ResourceClient dynamic.ResourceInterface
 }
 
 func NewClient(opts *options.Options) (*Client, error) {
-	k8sConfig := gardenercommons.GetGardenerKubeconfig(opts)
+	k8sConfig := gardenercommons.GetGardenerKubeconfig(opts.GardenerSecretPath)
 	client, err := k8sConfig.ClientConfig()
 	if err != nil {
 		return nil, err
@@ -27,19 +27,11 @@ func NewClient(opts *options.Options) (*Client, error) {
 	restConfig := dynamic.ConfigFor(client)
 	dynClient := dynamic.NewForConfigOrDie(restConfig)
 	resourceClient := dynClient.Resource(GroupVersionResource()).Namespace(opts.GardenerNamespace)
-	return &Client{resourceClient: resourceClient}, nil
-}
-
-func GroupVersionResource() schema.GroupVersionResource {
-	return schema.GroupVersionResource{
-		Version:  gardenerv1beta1.SchemeGroupVersion.Version,
-		Group:    gardenerv1beta1.SchemeGroupVersion.Group,
-		Resource: "shoots",
-	}
+	return &Client{ResourceClient: resourceClient}, nil
 }
 
 func (c Client) Get(ctx context.Context, shootName string) (*gardenerv1beta1.Shoot, error) {
-	unstructuredShoot, err := c.resourceClient.Get(ctx, shootName, metaV1.GetOptions{})
+	unstructuredShoot, err := c.ResourceClient.Get(ctx, shootName, metaV1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -53,4 +45,20 @@ func convertRuntimeObjToShoot(shootUnstructured *unstructured.Unstructured) (*ga
 		return nil, err
 	}
 	return shoot, nil
+}
+
+func GroupVersionResource() schema.GroupVersionResource {
+	return schema.GroupVersionResource{
+		Version:  gardenerv1beta1.SchemeGroupVersion.Version,
+		Group:    gardenerv1beta1.SchemeGroupVersion.Group,
+		Resource: "shoots",
+	}
+}
+
+func GroupVersionKind() schema.GroupVersionKind {
+	return schema.GroupVersionKind{
+		Version: gardenerv1beta1.SchemeGroupVersion.Version,
+		Group:   gardenerv1beta1.SchemeGroupVersion.Group,
+		Kind:    "Shoot",
+	}
 }
