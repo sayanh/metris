@@ -34,33 +34,27 @@ type Process struct {
 	Queue           workqueue.DelayingInterface
 	ShootClient     *gardenershoot.Client
 	SecretClient    *gardenersecret.Client
-	Logger          *logrus.Logger
 	Cache           *cache.Cache
 	Providers       *Providers
 	ScrapeInterval  time.Duration
 	WorkersPoolSize int
-}
-
-type Result struct {
-	Output EventStream
-	Err    error
+	Logger          *logrus.Logger
 }
 
 func (p Process) generateMetricFor(subAccountID string) (metric *edp.ConsumptionMetrics, kubeConfig string, shootName string, err error) {
 	ctx := context.Background()
+	var record metriscache.Record
+	var ok bool
 
 	obj, isFound := p.Cache.Get(subAccountID)
 	if !isFound {
 		err = fmt.Errorf("subAccountID was not found in cache")
 		return
 	}
-	var record metriscache.Record
-	var ok bool
 	if record, ok = obj.(metriscache.Record); !ok {
 		err = fmt.Errorf("bad item from cache")
 		return
 	}
-
 	p.Logger.Debugf("record found from cache: %+v", record)
 
 	shootName = record.ShootName
@@ -118,6 +112,7 @@ func (p Process) generateMetricFor(subAccountID string) (metric *edp.Consumption
 	return
 }
 
+// getOldMetric gets metric information for the given subAccountID which was saved in the cache earlier
 func (p Process) getOldMetric(subAccountID string) ([]byte, error) {
 	var oldMetricData []byte
 	var err error

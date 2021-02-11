@@ -33,7 +33,7 @@ func TestParse(t *testing.T) {
 			},
 			providers: *providers,
 			expectedMetrics: edp.ConsumptionMetrics{
-				ResourceGroups: nil,
+				//ResourceGroups: nil,
 				Compute: edp.Compute{
 					VMTypes: []edp.VMType{{
 						Name:  "standard_d8_v3",
@@ -52,7 +52,7 @@ func TestParse(t *testing.T) {
 			},
 			providers: *providers,
 			expectedMetrics: edp.ConsumptionMetrics{
-				ResourceGroups: nil,
+				//ResourceGroups: nil,
 				Compute: edp.Compute{
 					VMTypes: []edp.VMType{{
 						Name:  "standard_d8_v3",

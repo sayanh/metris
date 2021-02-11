@@ -1,8 +1,10 @@
 package testing
 
 import (
+	"crypto/rand"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"time"
@@ -26,9 +28,10 @@ const (
 
 type NewRuntimeOpts func(*kebruntime.RuntimeDTO)
 
-func NewRuntimesDTO(shootName string, opts ...NewRuntimeOpts) kebruntime.RuntimeDTO {
+func NewRuntimesDTO(subAccountID string, shootName string, opts ...NewRuntimeOpts) kebruntime.RuntimeDTO {
 	runtime := kebruntime.RuntimeDTO{
-		ShootName: shootName,
+		ShootName:    shootName,
+		SubAccountID: subAccountID,
 		Status: kebruntime.RuntimeStatus{
 			Provisioning: &kebruntime.Operation{
 				State: "succeeded",
@@ -48,6 +51,17 @@ func WithSucceededState(runtime *kebruntime.RuntimeDTO) {
 }
 func WithFailedState(runtime *kebruntime.RuntimeDTO) {
 	runtime.Status.Provisioning.State = "failed"
+}
+
+func WithProvisionedAndDeprovisionedState(runtime *kebruntime.RuntimeDTO) {
+	runtime.Status.Provisioning.State = "succeeded"
+	runtime.Status.Deprovisioning = &kebruntime.Operation{
+		State:           "succeeded",
+		Description:     "",
+		CreatedAt:       time.Now(),
+		OperationID:     "",
+		OrchestrationID: "",
+	}
 }
 
 func LoadFixtureFromFile(filePath string) ([]byte, error) {
@@ -176,4 +190,36 @@ func GetNode(name, vmType string) corev1.Node {
 			},
 		},
 	}
+}
+
+const (
+	letterBytes   = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" // 52 possibilities
+	letterIdxBits = 6                                                      // 6 bits to represent 64 possibilities / indexes
+	letterIdxMask = 1<<letterIdxBits - 1                                   // All 1-bits, as many as letterIdxBits
+)
+
+func GenerateRandomAlphaString(length int) string {
+	result := make([]byte, length)
+	bufferSize := int(float64(length) * 1.3)
+	for i, j, randomBytes := 0, 0, []byte{}; i < length; j++ {
+		if j%bufferSize == 0 {
+			randomBytes = secureRandomBytes(bufferSize)
+		}
+		if idx := int(randomBytes[j%length] & letterIdxMask); idx < len(letterBytes) {
+			result[i] = letterBytes[idx]
+			i++
+		}
+	}
+
+	return string(result)
+}
+
+// secureRandomBytes returns the requested number of bytes using crypto/rand
+func secureRandomBytes(length int) []byte {
+	var randomBytes = make([]byte, length)
+	_, err := rand.Read(randomBytes)
+	if err != nil {
+		log.Fatal("Unable to generate random bytes")
+	}
+	return randomBytes
 }

@@ -1,9 +1,9 @@
 package edp
 
 type ConsumptionMetrics struct {
-	ResourceGroups []string `json:"resource_groups" validate:"required"`
-	Compute        Compute  `json:"compute" validate:"required"`
-	Networking     struct {
+	//ResourceGroups []string `json:"resource_groups" validate:"required"`
+	Compute    Compute `json:"compute" validate:"required"`
+	Networking struct {
 		ProvisionedLoadbalancers int `json:"provisioned_loadbalancers" validate:"numeric"`
 		ProvisionedVnets         int `json:"provisioned_vnets" validate:"numeric"`
 		ProvisionedIPs           int `json:"provisioned_ips" validate:"numeric"`

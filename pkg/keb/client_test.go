@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
-	"net/url"
 	"testing"
 	"time"
 
@@ -33,11 +31,6 @@ func TestGetRuntimes(t *testing.T) {
 	g.Expect(err).Should(gomega.BeNil())
 
 	getRuntimesHandler := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-		// Health endpoint
-		if req.URL.Path == "/health" {
-			rw.WriteHeader(http.StatusOK)
-			return
-		}
 
 		// Success endpoint
 		if req.URL.Path == expectedPathPrefix {
@@ -49,30 +42,35 @@ func TestGetRuntimes(t *testing.T) {
 	})
 
 	// Start a local test HTTP server
-	server := httptest.NewServer(getRuntimesHandler)
-	// Close the server when test finishes
-	defer server.Close()
+	srv := metristesting.StartTestServer(expectedPathPrefix, getRuntimesHandler, g)
 
 	// Wait until test server is ready
 	g.Eventually(func() int {
 		// Ignoring error is ok as it goes for retry for non-200 cases
-		healthResp, _ := http.Get(fmt.Sprintf("%s/health", server.URL))
+		healthResp, err := http.Get(fmt.Sprintf("%s/health", srv.URL))
+		g.Expect(err).Should(gomega.BeNil())
+
 		return healthResp.StatusCode
 	}, timeout).Should(gomega.Equal(http.StatusOK))
 
-	kebURL, err := url.Parse(fmt.Sprintf("%s%s", server.URL, expectedPathPrefix))
-	g.Expect(err).Should(gomega.BeNil())
-	kebClient := Client{
-		HTTPClient:       http.DefaultClient,
+	kebURL := fmt.Sprintf("%s%s", srv.URL, expectedPathPrefix)
+
+	config := &Config{
+		URL:              kebURL,
+		Timeout:          3 * time.Second,
+		RetryCount:       1,
 		PollWaitDuration: 10 * time.Minute,
-		Logger:           &logrus.Logger{},
-		Request: &http.Request{
-			Method: http.MethodGet,
-			URL:    kebURL,
-		},
+	}
+	kebClient := Client{
+		HTTPClient: http.DefaultClient,
+		Logger:     &logrus.Logger{},
+		Config:     config,
 	}
 
-	gotRuntimes, err := kebClient.GetRuntimes()
+	req, err := kebClient.NewRequest()
+	g.Expect(err).Should(gomega.BeNil())
+
+	gotRuntimes, err := kebClient.GetRuntimes(req)
 	g.Expect(err).Should(gomega.BeNil())
 	g.Expect(gotRuntimes).To(gomega.Equal(expectedRuntimes))
 }
