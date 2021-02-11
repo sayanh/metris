@@ -1,4 +1,4 @@
-package node
+package svc
 
 import (
 	"context"
@@ -29,32 +29,32 @@ func NewClient(kubeconfig string) (*Client, error) {
 	return &Client{Resource: nsResourceClient}, nil
 }
 
-func (c Client) List(ctx context.Context) (*corev1.NodeList, error) {
+func (c Client) List(ctx context.Context) (*corev1.ServiceList, error) {
 
-	nodesUnstructured, err := c.Resource.Namespace(corev1.NamespaceAll).List(ctx, metaV1.ListOptions{})
+	unstructuredSvcList, err := c.Resource.Namespace(corev1.NamespaceAll).List(ctx, metaV1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
-	return convertRuntimeListToNodeList(nodesUnstructured)
+	return convertUnstructuredListToSVCList(unstructuredSvcList)
 }
 
-func convertRuntimeListToNodeList(unstructuredNodesList *unstructured.UnstructuredList) (*corev1.NodeList, error) {
-	nodeList := new(corev1.NodeList)
-	nodeListBytes, err := unstructuredNodesList.MarshalJSON()
+func convertUnstructuredListToSVCList(unstructuredSvcList *unstructured.UnstructuredList) (*corev1.ServiceList, error) {
+	svcList := new(corev1.ServiceList)
+	svcListBytes, err := unstructuredSvcList.MarshalJSON()
 	if err != nil {
 		return nil, err
 	}
-	err = json.Unmarshal(nodeListBytes, nodeList)
+	err = json.Unmarshal(svcListBytes, svcList)
 	if err != nil {
 		return nil, err
 	}
-	return nodeList, nil
+	return svcList, nil
 }
 
 func GroupVersionResource() schema.GroupVersionResource {
 	return schema.GroupVersionResource{
 		Version:  corev1.SchemeGroupVersion.Version,
 		Group:    corev1.SchemeGroupVersion.Group,
-		Resource: "nodes",
+		Resource: "services",
 	}
 }

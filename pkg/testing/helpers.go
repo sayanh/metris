@@ -2,6 +2,7 @@ package testing
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -9,9 +10,14 @@ import (
 	"net/http/httptest"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+
+	gardenerazurev1alpha1 "github.com/gardener/gardener-extension-provider-azure/pkg/apis/azure/v1alpha1"
+
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	gardencorev1beta1 "github.com/gardener/gardener/pkg/apis/core/v1beta1"
+	corev1 "k8s.io/api/core/v1"
 	metaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/onsi/gomega"
@@ -108,11 +114,9 @@ func GetShoot(name string, opts ...NewShootOpts) *gardencorev1beta1.Shoot {
 	return shoot
 }
 
-func WithAzureProviderAndStandard_D8_v3VMs(shoot *gardencorev1beta1.Shoot) {
+func WithVMSpecs(shoot *gardencorev1beta1.Shoot) {
 	shoot.Spec.Provider = gardencorev1beta1.Provider{
-		Type:                 "azure",
-		ControlPlaneConfig:   nil,
-		InfrastructureConfig: nil,
+		Type: "azure",
 		Workers: []gardencorev1beta1.Worker{
 			{
 				Name: "cpu-worker-0",
@@ -123,6 +127,47 @@ func WithAzureProviderAndStandard_D8_v3VMs(shoot *gardencorev1beta1.Shoot) {
 					},
 				},
 			},
+		},
+	}
+}
+
+func WithAzureProviderAndStandard_D8_v3VMs(shoot *gardencorev1beta1.Shoot) {
+	infraConfig := NewInfraConfig()
+	byteInfraConfig, err := json.Marshal(infraConfig)
+	if err != nil {
+		log.Fatalf("failed to marshal: %v", err)
+	}
+	shoot.Spec.Provider = gardencorev1beta1.Provider{
+		Type: "azure",
+		InfrastructureConfig: &runtime.RawExtension{
+			Raw: byteInfraConfig,
+		},
+		Workers: []gardencorev1beta1.Worker{
+			{
+				Name: "cpu-worker-0",
+				Machine: gardencorev1beta1.Machine{
+					Type: "Standard_D8_v3",
+					Image: &gardencorev1beta1.ShootMachineImage{
+						Name: "gardenlinux",
+					},
+				},
+			},
+		},
+	}
+}
+
+func NewInfraConfig() *gardenerazurev1alpha1.InfrastructureConfig {
+	name := "foo"
+	cidr := "10.25.0.0/19"
+	return &gardenerazurev1alpha1.InfrastructureConfig{
+		Networks: gardenerazurev1alpha1.NetworkConfig{
+			VNet: gardenerazurev1alpha1.VNet{
+				Name: &name,
+				CIDR: &cidr,
+			},
+			Workers:          "",
+			NatGateway:       nil,
+			ServiceEndpoints: nil,
 		},
 	}
 }
@@ -222,4 +267,127 @@ func secureRandomBytes(length int) []byte {
 		log.Fatal("Unable to generate random bytes")
 	}
 	return randomBytes
+}
+
+func Get3PVCs() *corev1.PersistentVolumeClaimList {
+	pv5GInFooNs := GetPV("foo-5G", "foo", "5Gi")
+	pv10GInFooNs := GetPV("foo-10G", "foo", "10Gi")
+	pv20GInBarNs := GetPV("foo-20G", "bar", "20Gi")
+
+	return &corev1.PersistentVolumeClaimList{
+		TypeMeta: metaV1.TypeMeta{
+			Kind:       "PersistentVolumeClaimList",
+			APIVersion: "v1",
+		},
+		ListMeta: metaV1.ListMeta{},
+		Items: []corev1.PersistentVolumeClaim{
+			*pv5GInFooNs,
+			*pv10GInFooNs,
+			*pv20GInBarNs,
+		},
+	}
+}
+
+func GetPVCs() *corev1.PersistentVolumeClaimList {
+	pv10GInFooNs := GetPV("foo-10G", "foo", "10Gi")
+	pv20GInBarNs := GetPV("foo-20G", "bar", "20Gi")
+
+	return &corev1.PersistentVolumeClaimList{
+		TypeMeta: metaV1.TypeMeta{
+			Kind:       "PersistentVolumeClaimList",
+			APIVersion: "v1",
+		},
+		ListMeta: metaV1.ListMeta{},
+		Items: []corev1.PersistentVolumeClaim{
+			*pv10GInFooNs,
+			*pv20GInBarNs,
+		},
+	}
+}
+
+func GetPV(name, namespace, capacity string) *corev1.PersistentVolumeClaim {
+	return &corev1.PersistentVolumeClaim{
+		ObjectMeta: metaV1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			Resources: corev1.ResourceRequirements{
+				Limits: nil,
+				Requests: corev1.ResourceList{
+					"storage": resource.MustParse(capacity),
+				},
+			},
+		},
+		Status: corev1.PersistentVolumeClaimStatus{
+			Phase: "",
+			Capacity: corev1.ResourceList{
+				"storage": resource.MustParse(capacity),
+			},
+			Conditions: nil,
+		},
+	}
+}
+
+func Get2SvcsOfDiffTypes() *corev1.ServiceList {
+	svc1 := GetSvc("svc1", "foo", WithClusterIP)
+	svc2 := GetSvc("svc2", "foo", WithLoadBalancer)
+	return &corev1.ServiceList{
+		TypeMeta: metaV1.TypeMeta{
+			Kind:       "ServiceList",
+			APIVersion: "v1",
+		},
+		Items: []corev1.Service{
+			*svc1, *svc2,
+		},
+	}
+}
+
+func GetSvcsWithLoadBalancers() *corev1.ServiceList {
+	svc1 := GetSvc("svc1", "foo", WithLoadBalancer)
+	svc2 := GetSvc("svc2", "bar", WithLoadBalancer)
+	return &corev1.ServiceList{
+		TypeMeta: metaV1.TypeMeta{
+			Kind:       "ServiceList",
+			APIVersion: "v1",
+		},
+		Items: []corev1.Service{
+			*svc1, *svc2,
+		},
+	}
+}
+
+type svcOpts func(service *corev1.Service)
+
+func GetSvc(name, ns string, opts ...svcOpts) *corev1.Service {
+	svc := &corev1.Service{
+		ObjectMeta: metaV1.ObjectMeta{
+			Name:      name,
+			Namespace: ns,
+		},
+	}
+
+	for _, opt := range opts {
+		opt(svc)
+	}
+
+	return svc
+}
+
+func WithClusterIP(service *corev1.Service) {
+	service.Spec = corev1.ServiceSpec{
+		Ports: []corev1.ServicePort{
+			{
+				Name:     "test",
+				Protocol: "tcp",
+				Port:     80,
+			},
+		},
+	}
+}
+
+func WithLoadBalancer(service *corev1.Service) {
+	service.Spec = corev1.ServiceSpec{
+		Type: "LoadBalancer",
+	}
 }

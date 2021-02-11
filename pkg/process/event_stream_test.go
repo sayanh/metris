@@ -26,10 +26,12 @@ func TestParse(t *testing.T) {
 		expectedErr     bool
 	}{
 		{
-			name: "with Azure and 2 vm types",
+			name: "with Azure, 2 vm types, 3 pvcs(5,10 and 20Gi) and 2 svcs(1 clusterIP and 1 LoadBalancer)",
 			input: Input{
-				shoot: metristesting.GetShoot("testShoot", metristesting.WithAzureProviderAndStandard_D8_v3VMs),
-				nodes: metristesting.Get2Nodes(),
+				shoot:    metristesting.GetShoot("testShoot", metristesting.WithAzureProviderAndStandard_D8_v3VMs),
+				nodeList: metristesting.Get2Nodes(),
+				pvcList:  metristesting.Get3PVCs(),
+				svcList:  metristesting.Get2SvcsOfDiffTypes(),
 			},
 			providers: *providers,
 			expectedMetrics: edp.ConsumptionMetrics{
@@ -41,14 +43,23 @@ func TestParse(t *testing.T) {
 					}},
 					ProvisionedCpus:  16,
 					ProvisionedRAMGb: 64,
+					ProvisionedVolumes: edp.ProvisionedVolumes{
+						SizeGbTotal:   417,
+						Count:         5,
+						SizeGbRounded: 448,
+					},
+				},
+				Networking: edp.Networking{
+					ProvisionedVnets: 1,
+					ProvisionedIPs:   1,
 				},
 			},
 		},
 		{
-			name: "with Azure and 3 vm types",
+			name: "with Azure with 3 vms and no pvc and svc",
 			input: Input{
-				shoot: metristesting.GetShoot("testShoot", metristesting.WithAzureProviderAndStandard_D8_v3VMs),
-				nodes: metristesting.Get3NodesWithStandardD8v3VMType(),
+				shoot:    metristesting.GetShoot("testShoot", metristesting.WithAzureProviderAndStandard_D8_v3VMs),
+				nodeList: metristesting.Get3NodesWithStandardD8v3VMType(),
 			},
 			providers: *providers,
 			expectedMetrics: edp.ConsumptionMetrics{
@@ -60,14 +71,23 @@ func TestParse(t *testing.T) {
 					}},
 					ProvisionedCpus:  24,
 					ProvisionedRAMGb: 96,
+					ProvisionedVolumes: edp.ProvisionedVolumes{
+						SizeGbTotal:   600,
+						Count:         3,
+						SizeGbRounded: 608,
+					},
+				},
+				Networking: edp.Networking{
+					ProvisionedVnets: 1,
+					ProvisionedIPs:   0,
 				},
 			},
 		},
 		{
 			name: "with Azure and vm type missing from the list of vmtypes",
 			input: Input{
-				shoot: metristesting.GetShoot("testShoot", metristesting.WithAzureProviderAndFooVMType),
-				nodes: metristesting.Get3NodesWithFooVMType(),
+				shoot:    metristesting.GetShoot("testShoot", metristesting.WithAzureProviderAndFooVMType),
+				nodeList: metristesting.Get3NodesWithFooVMType(),
 			},
 			providers:   *providers,
 			expectedErr: true,

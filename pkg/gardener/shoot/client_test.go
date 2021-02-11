@@ -21,7 +21,7 @@ func TestGet(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
 	ctx := context.Background()
 
-	shoot := metristesting.GetShoot("foo-shoot", metristesting.WithAzureProviderAndStandard_D8_v3VMs)
+	shoot := metristesting.GetShoot("foo-shoot", metristesting.WithVMSpecs)
 	nsResourceClient, err := NewFakeClient(shoot)
 	g.Expect(err).Should(gomega.BeNil())
 	client := Client{ResourceClient: nsResourceClient}

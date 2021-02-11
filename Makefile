@@ -87,17 +87,14 @@ vet:
 	go vet $$($(DIRS_TO_CHECK))
 
 test:
-	go test -cover ./pkg/...
+	go test -cover ./...
 
 test-all:
 	go test -cover ./...
 
 publish-test-results:
-	go test -coverprofile cover.out ./pkg/...
+	go test -coverprofile cover.out ./...
 	go tool cover -html=cover.out
-
-integration-test:
-	go test -cover ./integration-tests/...
 
 docker-compose-up:
 	docker-compose up

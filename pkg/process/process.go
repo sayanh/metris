@@ -15,6 +15,8 @@ import (
 	gardenersecret "github.com/kyma-incubator/metris/pkg/gardener/secret"
 	gardenershoot "github.com/kyma-incubator/metris/pkg/gardener/shoot"
 	skrnode "github.com/kyma-incubator/metris/pkg/skr/node"
+	skrpvc "github.com/kyma-incubator/metris/pkg/skr/pvc"
+	skrsvc "github.com/kyma-incubator/metris/pkg/skr/svc"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -95,13 +97,31 @@ func (p Process) generateMetricFor(subAccountID string) (metric *edp.Consumption
 		return
 	}
 
-	//pvcClient
-	//svcClient
+	// Get PVCs
+	pvcClient, err := skrpvc.NewClient(record.KubeConfig)
+	var pvcList *corev1.PersistentVolumeClaimList
+	pvcList, err = pvcClient.List(ctx)
+	if err != nil {
+		return
+	}
+
+	// Get Svcs
+	var svcList *corev1.ServiceList
+	svcClient, err := skrsvc.NewClient(record.KubeConfig)
+	if err != nil {
+		return
+	}
+	svcList, err = svcClient.List(ctx)
+	if err != nil {
+		return
+	}
 
 	// Create input
 	input := Input{
-		nodes: nodes,
-		shoot: shoot,
+		shoot:    shoot,
+		nodeList: nodes,
+		pvcList:  pvcList,
+		svcList:  svcList,
 	}
 	// Parse information and generate event stream
 	defer func() {
@@ -152,14 +172,20 @@ func (p Process) pollKEBForRuntimes() {
 		}
 		p.Logger.Debugf("num of runtimes are: %d", runtimesPage.Count)
 		p.populateCacheAndQueue(runtimesPage)
+
 		// TODO remove me "TESTING PURPOSES"
-		//_ = p.Cache.Add("39ba9a66-2c1a-4fe4-a28e-6e5db434084e", EngineInfo{
-		//	subAccountID: "39ba9a66-2c1a-4fe4-a28e-6e5db434084e",
-		//	shootName:    "c-69e1cca",
-		//	kubeConfig:   "",
-		//	metric:       nil,
-		//}, cache.NoExpiration)
+		testSubAccID := "8720b2bb-ffff-45b0-8448-799c22b85ac0"
+		testShootName := "c0983ec"
+		_ = p.Cache.Add(testSubAccID, metriscache.Record{
+			SubAccountID: testSubAccID,
+			ShootName:    testShootName,
+			KubeConfig:   "",
+			Metric:       nil,
+		}, cache.NoExpiration)
+		p.Queue.Add(testSubAccID)
 		// ------------------------------------
+
+		p.Logger.Infof("length of the cache: %d", p.Cache.ItemCount())
 		p.Logger.Infof("waiting to poll KEB again after %v....", p.KEBClient.Config.PollWaitDuration)
 		time.Sleep(p.KEBClient.Config.PollWaitDuration)
 	}
@@ -317,5 +343,4 @@ func (p Process) populateCacheAndQueue(runtimes *kebruntime.RuntimesPage) {
 			}
 		}
 	}
-	p.Logger.Infof("length of the cache: %d", p.Cache.ItemCount())
 }
