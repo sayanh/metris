@@ -2,6 +2,7 @@ package keb
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -50,9 +51,36 @@ func (c Client) NewRequest() (*http.Request, error) {
 	return req, nil
 }
 
-func (c Client) GetRuntimes(req *http.Request) (*kebruntime.RuntimesPage, error) {
-	c.Logger.Infof("polling for runtimes with URL: %s", req.URL.String())
+func (c Client) GetAllRuntimes(req *http.Request) (*kebruntime.RuntimesPage, error) {
+	morePages := true
+	pageNum := 1
+	recordsSeen := 0
+	finalRuntimesPage := new(kebruntime.RuntimesPage)
+	for morePages {
+		runtimesPage, err := c.GetRuntimesPerPage(req, pageNum)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to get runtimes from KEB")
+		}
+		finalRuntimesPage.Data = append(finalRuntimesPage.Data, runtimesPage.Data...)
+		finalRuntimesPage.Count = len(finalRuntimesPage.Data)
+		recordsSeen += runtimesPage.Count
+		c.Logger.Debugf("count: %d, records-seen: %d, page-num: %d, total-count: %d", runtimesPage.Count, recordsSeen, pageNum, runtimesPage.TotalCount)
+		if recordsSeen >= runtimesPage.TotalCount {
+			morePages = false
+			continue
+		}
+		pageNum += 1
+	}
+	finalRuntimesPage.TotalCount = recordsSeen
+	return finalRuntimesPage, nil
+}
 
+func (c Client) GetRuntimesPerPage(req *http.Request, pageNum int) (*kebruntime.RuntimesPage, error) {
+	c.Logger.Infof("polling for runtimes with URL: %s", req.URL.String())
+	query := url.Values{
+		"page": []string{fmt.Sprintf("%d", pageNum)},
+	}
+	req.URL.RawQuery = query.Encode()
 	customBackoff := wait.Backoff{
 		Steps:    c.Config.RetryCount,
 		Duration: c.HTTPClient.Timeout,
@@ -77,6 +105,12 @@ func (c Client) GetRuntimes(req *http.Request) (*kebruntime.RuntimesPage, error)
 	if err != nil {
 		c.Logger.Errorf("failed to get runtimes from KEB: %v", err)
 		return nil, errors.Wrapf(err, "failed to get runtimes from KEB")
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		failedErr := fmt.Errorf("KEB returned status code: %d", resp.StatusCode)
+		c.Logger.Errorf("%v", failedErr)
+		return nil, failedErr
 	}
 
 	body, err := ioutil.ReadAll(resp.Body)

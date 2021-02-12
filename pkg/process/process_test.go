@@ -24,15 +24,15 @@ func TestGetOldRecordIfMetricExists(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
 	cache := gocache.New(gocache.NoExpiration, gocache.NoExpiration)
 	expectedSubAccIDToExist := uuid.New().String()
-	expectedMetric := NewMetric()
+	expectedRecord := metriscache.Record{
+		SubAccountID: expectedSubAccIDToExist,
+		ShootName:    fmt.Sprintf("shoot-%s", metristesting.GenerateRandomAlphaString(5)),
+		KubeConfig:   "foo",
+		Metric:       NewMetric(),
+	}
 	expectedSubAccIDWithNoMetrics := uuid.New().String()
 	recordsToBeAdded := []metriscache.Record{
-		{
-			SubAccountID: expectedSubAccIDToExist,
-			ShootName:    fmt.Sprintf("shoot-%s", metristesting.GenerateRandomAlphaString(5)),
-			KubeConfig:   "foo",
-			Metric:       NewMetric(),
-		},
+		expectedRecord,
 		{
 			SubAccountID: uuid.New().String(),
 			ShootName:    fmt.Sprintf("shoot-%s", metristesting.GenerateRandomAlphaString(5)),
@@ -57,7 +57,7 @@ func TestGetOldRecordIfMetricExists(t *testing.T) {
 	t.Run("old metric found for a subAccountID", func(t *testing.T) {
 		gotRecord, err := p.getOldRecordIfMetricExists(expectedSubAccIDToExist)
 		g.Expect(err).Should(gomega.BeNil())
-		g.Expect(gotRecord.Metric).To(gomega.Equal(expectedMetric))
+		g.Expect(*gotRecord).To(gomega.Equal(expectedRecord))
 	})
 
 	t.Run("old metric not found for a subAccountID", func(t *testing.T) {
@@ -81,7 +81,7 @@ func TestPollKEBForRuntimes(t *testing.T) {
 func TestPopulateCacheAndQueue(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
 
-	t.Run("runtimes with provisioning succeeded clusters and failures", func(t *testing.T) {
+	t.Run("runtimes with only provisioned status and other statuses with failures", func(t *testing.T) {
 		provisionedSuccessfullySubAccIDs := []string{uuid.New().String(), uuid.New().String()}
 		provisionedFailedSubAccIDs := []string{uuid.New().String(), uuid.New().String()}
 		cache := gocache.New(gocache.NoExpiration, gocache.NoExpiration)
@@ -116,9 +116,9 @@ func TestPopulateCacheAndQueue(t *testing.T) {
 		}
 	})
 
-	t.Run("runtimes with provisioning succeeded clusters and failures", func(t *testing.T) {
+	t.Run("runtimes with both provisioned and deprovisioned status", func(t *testing.T) {
 		provisionedSuccessfullySubAccIDs := []string{uuid.New().String(), uuid.New().String()}
-		provisionedSucAndDeproSucSubAccIDs := []string{uuid.New().String(), uuid.New().String()}
+		provisionedAndDeprovisionedSubAccIDs := []string{uuid.New().String(), uuid.New().String()}
 		cache := gocache.New(gocache.NoExpiration, gocache.NoExpiration)
 		queue := workqueue.NewDelayingQueue()
 		p := Process{
@@ -134,25 +134,75 @@ func TestPopulateCacheAndQueue(t *testing.T) {
 		runtimesPage, expectedCache, expectedQueue, err := AddSuccessfulIDsToCacheQueueAndRuntimes(runtimesPage, provisionedSuccessfullySubAccIDs, expectedCache, expectedQueue)
 		g.Expect(err).Should(gomega.BeNil())
 
-		for _, failedID := range provisionedSucAndDeproSucSubAccIDs {
+		for _, failedID := range provisionedAndDeprovisionedSubAccIDs {
 			runtime := metristesting.NewRuntimesDTO(failedID, fmt.Sprintf("shoot-%s", metristesting.GenerateRandomAlphaString(5)), metristesting.WithProvisionedAndDeprovisionedState)
 			runtimesPage.Data = append(runtimesPage.Data, runtime)
 		}
 
 		p.populateCacheAndQueue(runtimesPage)
 		g.Expect(*p.Cache).To(gomega.Equal(*expectedCache))
-		g.Expect(p.Queue.Len()).To(gomega.Equal(expectedQueue.Len()))
-		for expectedQueue.Len() > 0 {
-			gotItem, _ := p.Queue.Get()
-			expectedItem, _ := expectedQueue.Get()
-			g.Expect(gotItem).To(gomega.Equal(expectedItem))
+		g.Expect(AreQueuesEqual(p.Queue, expectedQueue)).To(gomega.BeTrue())
+	})
+
+	t.Run("with loaded cache but shoot name changed", func(t *testing.T) {
+		subAccID := uuid.New().String()
+		cache := gocache.New(gocache.NoExpiration, gocache.NoExpiration)
+		queue := workqueue.NewDelayingQueue()
+		oldShootName := fmt.Sprintf("shoot-%s", metristesting.GenerateRandomAlphaString(5))
+		newShootName := fmt.Sprintf("shoot-%s", metristesting.GenerateRandomAlphaString(5))
+
+		p := Process{
+			Queue:  queue,
+			Cache:  cache,
+			Logger: logrus.New(),
 		}
+		oldRecord := NewRecord(subAccID, oldShootName, "foo")
+		newRecord := NewRecord(subAccID, newShootName, "")
+
+		err := p.Cache.Add(subAccID, oldRecord, gocache.NoExpiration)
+		g.Expect(err).Should(gomega.BeNil())
+
+		runtimesPage := new(kebruntime.RuntimesPage)
+		expectedQueue := workqueue.NewDelayingQueue()
+		expectedCache := gocache.New(gocache.NoExpiration, gocache.NoExpiration)
+		err = expectedCache.Add(subAccID, newRecord, gocache.NoExpiration)
+		g.Expect(err).Should(gomega.BeNil())
+
+		runtime := metristesting.NewRuntimesDTO(subAccID, newShootName, metristesting.WithSucceededState)
+		runtimesPage.Data = append(runtimesPage.Data, runtime)
+
+		p.populateCacheAndQueue(runtimesPage)
+		g.Expect(*p.Cache).To(gomega.Equal(*expectedCache))
+		g.Expect(AreQueuesEqual(p.Queue, expectedQueue)).To(gomega.BeTrue())
 	})
 
 }
 
+func NewRecord(subAccId, shootName, kubeconfig string) metriscache.Record {
+	return metriscache.Record{
+		SubAccountID: subAccId,
+		ShootName:    shootName,
+		KubeConfig:   kubeconfig,
+		Metric:       nil,
+	}
+}
+
 func TestExecute(t *testing.T) {
 
+}
+
+func AreQueuesEqual(src, dest workqueue.DelayingInterface) bool {
+	if src.Len() != dest.Len() {
+		return false
+	}
+	for src.Len() > 0 {
+		srcItem, _ := src.Get()
+		destItem, _ := dest.Get()
+		if srcItem != destItem {
+			return false
+		}
+	}
+	return true
 }
 
 func NewMetric() *edp.ConsumptionMetrics {

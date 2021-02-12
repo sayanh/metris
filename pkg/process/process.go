@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"sync"
 	"time"
 
@@ -159,34 +158,14 @@ func (p Process) pollKEBForRuntimes() {
 		p.Logger.Fatalf("failed to create a new request for KEB: %v", err)
 	}
 	for {
-		morePages := true
-		pageNum := 1
-		recordsSeen := 0
-		for morePages {
-			query := url.Values{
-				"page": []string{fmt.Sprintf("%d", pageNum)},
-			}
-			kebReq.URL.RawQuery = query.Encode()
-			runtimesPage, err := p.KEBClient.GetRuntimes(kebReq)
-			if err != nil {
-				p.Logger.Errorf("failed to get runtimes from KEB: %v", err)
-				time.Sleep(p.KEBClient.Config.PollWaitDuration)
-				continue
-			}
-			p.Logger.Debugf("num of runtimes are: %d", runtimesPage.Count)
-			p.populateCacheAndQueue(runtimesPage)
-			recordsSeen += runtimesPage.Count
-			p.Logger.Debugf("count: %d", runtimesPage.Count)
-			p.Logger.Debugf("records seen: %d", recordsSeen)
-			p.Logger.Debugf("page number: %d", pageNum)
-			p.Logger.Debugf("total count: %d", runtimesPage.TotalCount)
-			if recordsSeen >= runtimesPage.TotalCount {
-				morePages = false
-				continue
-			}
-			pageNum += 1
+		runtimesPage, err := p.KEBClient.GetAllRuntimes(kebReq)
+		if err != nil {
+			p.Logger.Errorf("failed to get runtimes from KEB: %v", err)
+			time.Sleep(p.KEBClient.Config.PollWaitDuration)
+			continue
 		}
-
+		p.Logger.Debugf("num of runtimes are: %d", runtimesPage.Count)
+		p.populateCacheAndQueue(runtimesPage)
 		p.Logger.Debugf("length of the cache after KEB is done populating: %d", p.Cache.ItemCount())
 		p.Logger.Infof("waiting to poll KEB again after %v....", p.KEBClient.Config.PollWaitDuration)
 		time.Sleep(p.KEBClient.Config.PollWaitDuration)
@@ -330,23 +309,35 @@ func isClusterTrackable(runtime *kebruntime.RuntimeDTO) bool {
 func (p Process) populateCacheAndQueue(runtimes *kebruntime.RuntimesPage) {
 
 	for _, runtime := range runtimes.Data {
-		_, isFound := p.Cache.Get(runtime.SubAccountID)
+		if runtime.SubAccountID == "" {
+			continue
+		}
+		recordObj, isFound := p.Cache.Get(runtime.SubAccountID)
 		if isClusterTrackable(&runtime) {
+			newRecord := metriscache.Record{
+				SubAccountID: runtime.SubAccountID,
+				ShootName:    runtime.ShootName,
+				KubeConfig:   "",
+				Metric:       nil,
+			}
 			if !isFound {
-				record := metriscache.Record{
-					SubAccountID: runtime.SubAccountID,
-					ShootName:    runtime.ShootName,
-					KubeConfig:   "",
-					Metric:       nil,
+				err := p.Cache.Add(runtime.SubAccountID, newRecord, cache.NoExpiration)
+				if err != nil {
+					p.Logger.Errorf("failed to add subAccountID: %v to cache hence skipping queueing it", err)
+					continue
 				}
-				if runtime.SubAccountID != "" {
-					err := p.Cache.Add(runtime.SubAccountID, record, cache.NoExpiration)
-					if err != nil {
-						p.Logger.Errorf("failed to add subAccountID: %v to cache hence skipping queueing it", err)
-						continue
-					}
-					p.Queue.Add(runtime.SubAccountID)
-					p.Logger.Debugf("Queued and added to cache: %v", runtime.SubAccountID)
+				p.Queue.Add(runtime.SubAccountID)
+				p.Logger.Debugf("Queued and added to cache: %v", runtime.SubAccountID)
+				continue
+			}
+
+			// Cluster is trackable and exists in the cache
+			if record, ok := recordObj.(metriscache.Record); ok {
+				if record.ShootName != runtime.ShootName {
+					// The shootname has changed hence the record in the cache is not valid anymore
+					// No need to queue as the subAccountID already exists in queue
+					p.Logger.Debugf("reset the values in cache: %v", runtime.SubAccountID)
+					p.Cache.Set(runtime.SubAccountID, newRecord, cache.NoExpiration)
 				}
 			}
 		} else {
