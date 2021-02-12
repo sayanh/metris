@@ -1,7 +1,6 @@
 package process
 
 import (
-	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -21,32 +20,28 @@ import (
 	kebruntime "github.com/kyma-project/control-plane/components/kyma-environment-broker/common/runtime"
 )
 
-func TestGetOldMetric(t *testing.T) {
+func TestGetOldRecordIfMetricExists(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
 	cache := gocache.New(gocache.NoExpiration, gocache.NoExpiration)
 	expectedSubAccIDToExist := uuid.New().String()
 	expectedMetric := NewMetric()
-	expectedMetricData, err := json.Marshal(expectedMetric)
 	expectedSubAccIDWithNoMetrics := uuid.New().String()
-	g.Expect(err).Should(gomega.BeNil())
 	recordsToBeAdded := []metriscache.Record{
 		{
 			SubAccountID: expectedSubAccIDToExist,
 			ShootName:    fmt.Sprintf("shoot-%s", metristesting.GenerateRandomAlphaString(5)),
 			KubeConfig:   "foo",
-			Metric:       expectedMetric,
+			Metric:       NewMetric(),
 		},
 		{
 			SubAccountID: uuid.New().String(),
 			ShootName:    fmt.Sprintf("shoot-%s", metristesting.GenerateRandomAlphaString(5)),
 			KubeConfig:   "foo",
-			Metric:       expectedMetric,
 		},
 		{
 			SubAccountID: expectedSubAccIDWithNoMetrics,
 			ShootName:    "",
 			KubeConfig:   "",
-			Metric:       nil,
 		},
 	}
 	for _, record := range recordsToBeAdded {
@@ -60,20 +55,20 @@ func TestGetOldMetric(t *testing.T) {
 	}
 
 	t.Run("old metric found for a subAccountID", func(t *testing.T) {
-		gotMetric, err := p.getOldMetric(expectedSubAccIDToExist)
+		gotRecord, err := p.getOldRecordIfMetricExists(expectedSubAccIDToExist)
 		g.Expect(err).Should(gomega.BeNil())
-		g.Expect(gotMetric).To(gomega.Equal(expectedMetricData))
+		g.Expect(gotRecord.Metric).To(gomega.Equal(expectedMetric))
 	})
 
 	t.Run("old metric not found for a subAccountID", func(t *testing.T) {
 		subAccIDWhichDoesNotExist := uuid.New().String()
-		_, err := p.getOldMetric(subAccIDWhichDoesNotExist)
+		_, err := p.getOldRecordIfMetricExists(subAccIDWhichDoesNotExist)
 		g.Expect(err).ShouldNot(gomega.BeNil())
 		g.Expect(err.Error()).To(gomega.Equal(fmt.Sprintf("subAccountID: %s not found", subAccIDWhichDoesNotExist)))
 	})
 
 	t.Run("old metric found for a subAccountID but does not have metric", func(t *testing.T) {
-		_, err := p.getOldMetric(expectedSubAccIDWithNoMetrics)
+		_, err := p.getOldRecordIfMetricExists(expectedSubAccIDWithNoMetrics)
 		g.Expect(err).ShouldNot(gomega.BeNil())
 		g.Expect(err.Error()).To(gomega.Equal(fmt.Sprintf("old metrics for subAccountID: %s not found", expectedSubAccIDWithNoMetrics)))
 	})

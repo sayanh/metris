@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sirupsen/logrus"
+
 	metristesting "github.com/kyma-incubator/metris/pkg/testing"
 
 	"github.com/onsi/gomega"
@@ -29,7 +31,6 @@ func TestClient(t *testing.T) {
 	expectedHeaders := http.Header{
 		"Authorization":   []string{fmt.Sprintf("Bearer %s", testToken)},
 		"Accept-Encoding": []string{"gzip"},
-		"Content-Length":  []string{"7"},
 		"User-Agent":      []string{"metris"},
 		"Content-Type":    []string{"application/json;charset=utf-8"},
 	}
@@ -48,13 +49,13 @@ func TestClient(t *testing.T) {
 	edpURL, err := url.ParseRequestURI(srv.URL)
 	g.Expect(err).Should(gomega.BeNil())
 
-	edpClient := NewClient(config)
+	edpClient := NewClient(config, logrus.New())
 	testData := []byte("foodata")
-	gotReq, err := edpClient.NewRequest(dataTenant, testData)
+	gotReq, err := edpClient.NewRequest(dataTenant)
 	g.Expect(err).Should(gomega.BeNil())
 	g.Expect(gotReq.URL.Host).To(gomega.Equal(edpURL.Host))
 
-	resp, err := edpClient.Send(gotReq)
+	resp, err := edpClient.Send(gotReq, testData)
 	g.Expect(err).Should(gomega.BeNil())
 	g.Expect(resp.StatusCode).Should(gomega.Equal(http.StatusCreated))
 
@@ -89,13 +90,13 @@ func TestClientRetry(t *testing.T) {
 	edpURL, err := url.ParseRequestURI(srv.URL)
 	g.Expect(err).Should(gomega.BeNil())
 
-	edpClient := NewClient(config)
+	edpClient := NewClient(config, logrus.New())
 	testData := []byte("foodata")
-	gotReq, err := edpClient.NewRequest(dataTenant, testData)
+	gotReq, err := edpClient.NewRequest(dataTenant)
 	g.Expect(err).Should(gomega.BeNil())
 	g.Expect(gotReq.URL.Host).To(gomega.Equal(edpURL.Host))
 
-	_, err = edpClient.Send(gotReq)
+	_, err = edpClient.Send(gotReq, testData)
 	g.Expect(err.Error()).Should(gomega.Equal("failed to POST event to EDP: failed to send event stream as EDP returned HTTP: 500"))
 	g.Expect(countRetry).Should(gomega.Equal(2))
 

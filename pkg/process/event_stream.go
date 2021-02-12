@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
@@ -123,6 +124,7 @@ func (inp Input) Parse(providers *Providers) (*edp.ConsumptionMetrics, error) {
 			return nil, fmt.Errorf("provider: %s does not match in the system", inp.shoot.Spec.Provider.Type)
 		}
 	}
+	metric.Timestamp = getTimestampNow()
 	metric.Compute.ProvisionedCpus = provisionedCPUs
 	metric.Compute.ProvisionedRAMGb = provisionedMemory
 
@@ -142,6 +144,11 @@ func (inp Input) Parse(providers *Providers) (*edp.ConsumptionMetrics, error) {
 	}
 
 	return metric, nil
+}
+
+// getTimestampNow returns the time now in the format of RFC3339
+func getTimestampNow() string {
+	return time.Now().Format(time.RFC3339)
 }
 
 func getVolumeRoundedToFactor(size int64) int64 {

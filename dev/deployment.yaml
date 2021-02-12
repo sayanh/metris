@@ -26,6 +26,8 @@ spec:
       - image: ko://github.com/kyma-incubator/metris/cmd
         imagePullPolicy: Always
         name: metrisv2
+        args:
+          - "-log-level=debug"
         env:
           - name: PUBLIC_CLOUD_SPECS
             valueFrom:
@@ -35,12 +37,21 @@ spec:
           - name: KEB_URL
             value: http://kcp-kyma-environment-broker.kcp-system/runtimes
           - name: EDP_URL
-            value: http://edp-mock.kcp-system:8080
+#            value: http://edp-mock.kcp-system:8080
+            value: https://input.yevents.io
           - name: EDP_TOKEN
             valueFrom:
               secretKeyRef:
                 key: token
-                name: kcp-metris
+                name: kcp-metrisv2
+          - name: EDP_NAMESPACE
+            value: kyma-dev
+          - name: EDP_DATASTREAM_NAME
+            value: consumption-metrics-new-test
+          - name: EDP_DATASTREAM_VERSION
+            value: "1"
+          - name: EDP_DATASTREAM_ENV
+            value: dev
         volumeMounts:
           - mountPath: /gardener
             name: gardener-kubeconfig

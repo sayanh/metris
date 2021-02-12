@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -43,9 +44,8 @@ type Process struct {
 	Logger          *logrus.Logger
 }
 
-func (p Process) generateMetricFor(subAccountID string) (metric *edp.ConsumptionMetrics, kubeConfig string, shootName string, err error) {
+func (p Process) generateMetricFor(identifier int, subAccountID string) (record metriscache.Record, err error) {
 	ctx := context.Background()
-	var record metriscache.Record
 	var ok bool
 
 	obj, isFound := p.Cache.Get(subAccountID)
@@ -53,13 +53,15 @@ func (p Process) generateMetricFor(subAccountID string) (metric *edp.Consumption
 		err = fmt.Errorf("subAccountID was not found in cache")
 		return
 	}
+
+	defer p.Queue.Done(subAccountID)
 	if record, ok = obj.(metriscache.Record); !ok {
 		err = fmt.Errorf("bad item from cache")
 		return
 	}
-	p.Logger.Debugf("record found from cache: %+v", record)
+	p.Logger.Debugf("[worker: %d] record found from cache: %+v", identifier, record)
 
-	shootName = record.ShootName
+	shootName := record.ShootName
 
 	if record.KubeConfig == "" {
 		// Get shoot kubeconfig secret
@@ -91,7 +93,6 @@ func (p Process) generateMetricFor(subAccountID string) (metric *edp.Consumption
 		return
 	}
 
-	p.Logger.Debugf("nodes count: %v", len(nodes.Items))
 	if len(nodes.Items) == 0 {
 		err = fmt.Errorf("no nodes to process")
 		return
@@ -99,6 +100,9 @@ func (p Process) generateMetricFor(subAccountID string) (metric *edp.Consumption
 
 	// Get PVCs
 	pvcClient, err := skrpvc.NewClient(record.KubeConfig)
+	if err != nil {
+		return
+	}
 	var pvcList *corev1.PersistentVolumeClaimList
 	pvcList, err = pvcClient.List(ctx)
 	if err != nil {
@@ -123,69 +127,67 @@ func (p Process) generateMetricFor(subAccountID string) (metric *edp.Consumption
 		pvcList:  pvcList,
 		svcList:  svcList,
 	}
-	// Parse information and generate event stream
-	defer func() {
-		p.Logger.Debugf("---- end of processing --- for shoot: %s", shootName)
-	}()
-	metric, err = input.Parse(p.Providers)
-
+	metric, err := input.Parse(p.Providers)
+	record.Metric = metric
 	return
 }
 
-// getOldMetric gets metric information for the given subAccountID which was saved in the cache earlier
-func (p Process) getOldMetric(subAccountID string) ([]byte, error) {
-	var oldMetricData []byte
-	var err error
+// getOldRecordIfMetricExists gets old record from cache if old metric exists
+func (p Process) getOldRecordIfMetricExists(subAccountID string) (*metriscache.Record, error) {
 	oldRecordObj, found := p.Cache.Get(subAccountID)
 	if !found {
 		notFoundErr := fmt.Errorf("subAccountID: %s not found", subAccountID)
 		p.Logger.Error(notFoundErr)
-		return []byte{}, notFoundErr
+		return nil, notFoundErr
 	}
 
 	if oldRecord, ok := oldRecordObj.(metriscache.Record); ok {
-		if oldRecord.Metric == nil {
-			notFoundErr := fmt.Errorf("old metrics for subAccountID: %s not found", subAccountID)
-			p.Logger.Error(notFoundErr)
-			return []byte{}, notFoundErr
-		}
-		oldMetricData, err = json.Marshal(*oldRecord.Metric)
-		if err != nil {
-			return []byte{}, err
+		if oldRecord.Metric != nil {
+			return &oldRecord, nil
 		}
 	}
-	return oldMetricData, nil
+	notFoundErr := fmt.Errorf("old metrics for subAccountID: %s not found", subAccountID)
+	p.Logger.Error(notFoundErr)
+	return nil, notFoundErr
 }
 
 // pollKEBForRuntimes polls KEB for runtimes information
 func (p Process) pollKEBForRuntimes() {
 	kebReq, err := p.KEBClient.NewRequest()
+
 	if err != nil {
 		p.Logger.Fatalf("failed to create a new request for KEB: %v", err)
 	}
 	for {
-		runtimesPage, err := p.KEBClient.GetRuntimes(kebReq)
-		if err != nil {
-			p.Logger.Errorf("failed to get runtimes from KEB: %v", err)
-			time.Sleep(p.KEBClient.Config.PollWaitDuration)
-			continue
+		morePages := true
+		pageNum := 1
+		recordsSeen := 0
+		for morePages {
+			query := url.Values{
+				"page": []string{fmt.Sprintf("%d", pageNum)},
+			}
+			kebReq.URL.RawQuery = query.Encode()
+			runtimesPage, err := p.KEBClient.GetRuntimes(kebReq)
+			if err != nil {
+				p.Logger.Errorf("failed to get runtimes from KEB: %v", err)
+				time.Sleep(p.KEBClient.Config.PollWaitDuration)
+				continue
+			}
+			p.Logger.Debugf("num of runtimes are: %d", runtimesPage.Count)
+			p.populateCacheAndQueue(runtimesPage)
+			recordsSeen += runtimesPage.Count
+			p.Logger.Debugf("count: %d", runtimesPage.Count)
+			p.Logger.Debugf("records seen: %d", recordsSeen)
+			p.Logger.Debugf("page number: %d", pageNum)
+			p.Logger.Debugf("total count: %d", runtimesPage.TotalCount)
+			if recordsSeen >= runtimesPage.TotalCount {
+				morePages = false
+				continue
+			}
+			pageNum += 1
 		}
-		p.Logger.Debugf("num of runtimes are: %d", runtimesPage.Count)
-		p.populateCacheAndQueue(runtimesPage)
 
-		// TODO remove me "TESTING PURPOSES"
-		testSubAccID := "8720b2bb-ffff-45b0-8448-799c22b85ac0"
-		testShootName := "c0983ec"
-		_ = p.Cache.Add(testSubAccID, metriscache.Record{
-			SubAccountID: testSubAccID,
-			ShootName:    testShootName,
-			KubeConfig:   "",
-			Metric:       nil,
-		}, cache.NoExpiration)
-		p.Queue.Add(testSubAccID)
-		// ------------------------------------
-
-		p.Logger.Infof("length of the cache: %d", p.Cache.ItemCount())
+		p.Logger.Debugf("length of the cache after KEB is done populating: %d", p.Cache.ItemCount())
 		p.Logger.Infof("waiting to poll KEB again after %v....", p.KEBClient.Config.PollWaitDuration)
 		time.Sleep(p.KEBClient.Config.PollWaitDuration)
 	}
@@ -200,9 +202,10 @@ func (p Process) Start() {
 	}()
 
 	for i := 0; i < p.WorkersPoolSize; i++ {
+		j := i
 		go func() {
 			defer wg.Done()
-			p.Execute()
+			p.Execute(j)
 			p.Logger.Infof("########  Worker exits #######")
 		}()
 	}
@@ -210,10 +213,10 @@ func (p Process) Start() {
 }
 
 // Execute is executed by each worker to process an entry from the queue
-func (p Process) Execute() {
+func (p Process) Execute(identifier int) {
 
 	for {
-		var payload, oldMetric []byte
+		var payload []byte
 		// Pick up a subAccountID to process from queue
 		subAccountIDObj, isShuttingDown := p.Queue.Get()
 		if isShuttingDown {
@@ -223,70 +226,80 @@ func (p Process) Execute() {
 		subAccountID := fmt.Sprintf("%v", subAccountIDObj)
 
 		if subAccountID == "" {
-			p.Logger.Warn("cannot work with empty subAccountID")
+			p.Logger.Warnf("[worker: %d] cannot work with empty subAccountID", identifier)
 			continue
 		}
 
-		p.Logger.Infof("Subaccid: %v is fetched from queue", subAccountIDObj)
-		metric, kubeconfig, shootName, err := p.generateMetricFor(subAccountID)
+		p.Logger.Debugf("[worker: %d] subaccid: %v is fetched from queue", identifier, subAccountIDObj)
+		record, isOldMetricValid, err := p.getRecordWithOldOrNewMetricFor(identifier, subAccountID)
 		if err != nil {
-			p.Logger.Errorf("failed to generate new metric for subaccountID: %v, err: %v", subAccountID, err)
-			// Get old data
-			oldMetric, err = p.getOldMetric(subAccountID)
-			if err != nil {
-				p.Logger.Errorf("failed to getOldMetric for subaccountID: %s, err: %v", subAccountID, err)
-				// Nothing to do
-				continue
-			}
-		}
+			p.Logger.Errorf("[worker: %d] no metric found/generated for subaccount id: %v", identifier, err)
 
-		if len(oldMetric) == 0 {
-			payload, err = json.Marshal(metric)
-			if err != nil {
-				// Get old data
-				oldMetric, err = p.getOldMetric(subAccountID)
-				if err != nil {
-					p.Logger.Errorf("failed to get old metric: %v", err)
-					// Nothing to do
-					continue
-				}
-			}
-		} else {
-			payload = oldMetric
+			p.Logger.Debugf("[worker: %d] successfully requed after %v for subAccountID %s", identifier, p.ScrapeInterval, subAccountID)
+			p.Queue.AddAfter(subAccountID, p.ScrapeInterval)
+
+			// Nothing to do further
+			continue
+		}
+		payload, err = json.Marshal(*record.Metric)
+		if err != nil {
+			p.Logger.Errorf("[worker: %d] failed to json.Marshal metric for subaccount id: %v", identifier, err)
+
+			p.Logger.Debugf("[worker: %d] successfully requed after %v for subAccountID %s", identifier, p.ScrapeInterval, subAccountID)
+			p.Queue.AddAfter(subAccountID, p.ScrapeInterval)
+
+			// Nothing to do further
+			continue
 		}
 
 		// Note: EDP refers SubAccountID as tenant
+		p.Logger.Debugf("[worker: %d] sending EventStreamToEDP: tenant: %s payload: %s", identifier, subAccountID, string(payload))
 		err = p.sendEventStreamToEDP(subAccountID, payload)
 		if err != nil {
 			// Nothing to do further hence continue
-			p.Logger.Errorf("failed to send metric to EDP for subAccountID: %s, event-stream: %s", subAccountID, string(payload))
+			p.Logger.Errorf("[worker: %d] failed to send metric to EDP for subAccountID: %s, event-stream: %s, with err: %v", identifier, subAccountID, string(payload), err)
+
+			p.Logger.Debugf("[worker: %d] successfully requed after %v for subAccountID %s", identifier, p.ScrapeInterval, subAccountID)
+			p.Queue.AddAfter(subAccountID, p.ScrapeInterval)
+
 			continue
 		}
-		p.Logger.Infof("successfully sent event stream for subaccountID: %s, shoot: %s", subAccountID, shootName)
+		p.Logger.Infof("[worker: %d] successfully sent event stream for subaccountID: %s, shoot: %s", identifier, subAccountID, record.ShootName)
 
-		if len(oldMetric) == 0 {
-			newRecord := metriscache.Record{
-				SubAccountID: subAccountID,
-				ShootName:    shootName,
-				KubeConfig:   kubeconfig,
-				Metric:       metric,
-			}
-			p.Cache.Set(newRecord.SubAccountID, newRecord, cache.NoExpiration)
-			p.Queue.AddAfter(subAccountID, p.ScrapeInterval)
-			p.Logger.Infof("Length of queue: %d", p.Queue.Len())
-			p.Logger.Debugf("successfully saved metric and requed for subAccountID %s, %s", newRecord.SubAccountID, string(payload))
+		if !isOldMetricValid {
+			p.Cache.Set(record.SubAccountID, *record, cache.NoExpiration)
+			p.Logger.Debugf("[worker: %d] successfully saved metric for subAccountID %s", identifier, record.SubAccountID)
 		}
+
+		// Reque the subaccountID anyway
+		p.Logger.Debugf("[worker: %d] successfully requed after %v for subAccountID %s", identifier, p.ScrapeInterval, subAccountID)
+		p.Queue.AddAfter(subAccountID, p.ScrapeInterval)
 	}
 }
 
+func (p Process) getRecordWithOldOrNewMetricFor(identifier int, subAccountID string) (*metriscache.Record, bool, error) {
+	record, err := p.generateMetricFor(identifier, subAccountID)
+	if err != nil {
+		p.Logger.Errorf("failed to generate new metric for subaccountID: %v, err: %v", subAccountID, err)
+		// Get old data
+		oldRecord, err := p.getOldRecordIfMetricExists(subAccountID)
+		if err != nil {
+			// Nothing to do
+			return nil, false, errors.Wrapf(err, "failed to get getOldMetric for subaccountID: %s", subAccountID)
+		}
+		return oldRecord, true, nil
+	}
+
+	return &record, false, nil
+}
+
 func (p Process) sendEventStreamToEDP(tenant string, payload []byte) error {
-	p.Logger.Infof("inside sendEventStreamToEDP: tenant: %s payload: %s", tenant, string(payload))
-	edpRequest, err := p.EDPClient.NewRequest(tenant, payload)
+	edpRequest, err := p.EDPClient.NewRequest(tenant)
 	if err != nil {
 		return errors.Wrapf(err, "failed to create a new request for EDP")
 	}
 
-	resp, err := p.EDPClient.Send(edpRequest)
+	resp, err := p.EDPClient.Send(edpRequest, payload)
 	if err != nil {
 		return errors.Wrapf(err, "failed to send event-stream to EDP")
 	}
@@ -333,12 +346,12 @@ func (p Process) populateCacheAndQueue(runtimes *kebruntime.RuntimesPage) {
 						continue
 					}
 					p.Queue.Add(runtime.SubAccountID)
-					p.Logger.Infof("Queued and added to cache: %v", runtime.SubAccountID)
+					p.Logger.Debugf("Queued and added to cache: %v", runtime.SubAccountID)
 				}
 			}
 		} else {
 			if isFound {
-				p.Logger.Infof("Deleting subAccountID: %v", runtime.SubAccountID)
+				p.Logger.Debugf("Deleting subAccountID: %v", runtime.SubAccountID)
 				p.Cache.Delete(runtime.SubAccountID)
 			}
 		}

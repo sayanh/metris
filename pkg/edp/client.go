@@ -3,6 +3,7 @@ package edp
 import (
 	"bytes"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"time"
 
@@ -26,19 +27,19 @@ const (
 	userAgentMetris = "metris"
 )
 
-func NewClient(config *Config) *Client {
+func NewClient(config *Config, logger *logrus.Logger) *Client {
 	httpClient := &http.Client{
 		Transport: http.DefaultTransport,
 		Timeout:   config.Timeout,
 	}
 	return &Client{
 		HttpClient: httpClient,
-		Logger:     logrus.New(),
+		Logger:     logger,
 		Config:     config,
 	}
 }
 
-func (eClient Client) NewRequest(dataTenant string, eventData []byte) (*http.Request, error) {
+func (eClient Client) NewRequest(dataTenant string) (*http.Request, error) {
 	edpURL := fmt.Sprintf(edpPathFormat,
 		eClient.Config.URL,
 		eClient.Config.Namespace,
@@ -49,7 +50,7 @@ func (eClient Client) NewRequest(dataTenant string, eventData []byte) (*http.Req
 	)
 
 	eClient.Logger.Debugf("sending event to '%s'", edpURL)
-	req, err := http.NewRequest(http.MethodPost, edpURL, bytes.NewBuffer(eventData))
+	req, err := http.NewRequest(http.MethodPost, edpURL, bytes.NewBuffer([]byte{}))
 	if err != nil {
 		return nil, fmt.Errorf("failed generate request for EDP, %d: %v", http.StatusBadRequest, err)
 	}
@@ -61,7 +62,7 @@ func (eClient Client) NewRequest(dataTenant string, eventData []byte) (*http.Req
 	return req, nil
 }
 
-func (eClient Client) Send(req *http.Request) (*http.Response, error) {
+func (eClient Client) Send(req *http.Request, payload []byte) (*http.Response, error) {
 	var resp *http.Response
 	var err error
 	// TODO make it configurable
@@ -77,10 +78,11 @@ func (eClient Client) Send(req *http.Request) (*http.Response, error) {
 		}
 		return false
 	}, func() (err error) {
+		req.Body = ioutil.NopCloser(bytes.NewReader(payload))
 		resp, err = eClient.HttpClient.Do(req)
 		if err != nil {
+			eClient.Logger.Debugf("req: %v", req)
 			eClient.Logger.Warnf("will be retried: failed to send event stream to EDP: %v", err)
-			eClient.Logger.Warnf("req: %v", req)
 			return
 		}
 
@@ -93,9 +95,7 @@ func (eClient Client) Send(req *http.Request) (*http.Response, error) {
 	})
 
 	if err != nil {
-		failedErr := errors.Wrapf(err, "failed to POST event to EDP")
-		eClient.Logger.Errorf("%v", failedErr)
-		return nil, failedErr
+		return nil, errors.Wrapf(err, "failed to POST event to EDP")
 	}
 
 	defer func() {

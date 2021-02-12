@@ -51,7 +51,7 @@ func (c Client) NewRequest() (*http.Request, error) {
 }
 
 func (c Client) GetRuntimes(req *http.Request) (*kebruntime.RuntimesPage, error) {
-	c.Logger.Infof(" polling for runtimes")
+	c.Logger.Infof("polling for runtimes with URL: %s", req.URL.String())
 
 	customBackoff := wait.Backoff{
 		Steps:    c.Config.RetryCount,

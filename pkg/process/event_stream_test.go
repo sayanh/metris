@@ -46,7 +46,7 @@ func TestParse(t *testing.T) {
 					ProvisionedCpus:  16,
 					ProvisionedRAMGb: 64,
 					ProvisionedVolumes: edp.ProvisionedVolumes{
-						SizeGbTotal:   417,
+						SizeGbTotal:   435,
 						Count:         5,
 						SizeGbRounded: 448,
 					},
@@ -128,7 +128,9 @@ func TestParse(t *testing.T) {
 			gotMetrics, err := tc.input.Parse(&tc.providers)
 			if err == nil {
 				g.Expect(err).Should(gomega.BeNil())
-				g.Expect(*gotMetrics).To(gomega.Equal(tc.expectedMetrics))
+				g.Expect(gotMetrics.Compute).To(gomega.Equal(tc.expectedMetrics.Compute))
+				g.Expect(gotMetrics.Networking).To(gomega.Equal(tc.expectedMetrics.Networking))
+				g.Expect(gotMetrics.Timestamp).To(gomega.Not(gomega.BeEmpty()))
 				return
 			}
 			g.Expect(err).ShouldNot(gomega.BeNil())

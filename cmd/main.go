@@ -33,8 +33,8 @@ const (
 )
 
 func main() {
-	opts := options.ParseArgs()
 
+	opts := options.ParseArgs()
 	log := logrus.New()
 	log.Level = opts.LogLevel
 	log.Print("Starting application with options: ", opts.String())
@@ -78,7 +78,7 @@ func main() {
 	if err := envconfig.Process("", edpConfig); err != nil {
 		log.Fatalf("failed to load EDP config: %s", err)
 	}
-	edpClient := edp.NewClient(edpConfig)
+	edpClient := edp.NewClient(edpConfig, log)
 
 	queue := workqueue.NewDelayingQueue()
 
