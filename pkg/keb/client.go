@@ -76,7 +76,7 @@ func (c Client) GetAllRuntimes(req *http.Request) (*kebruntime.RuntimesPage, err
 }
 
 func (c Client) GetRuntimesPerPage(req *http.Request, pageNum int) (*kebruntime.RuntimesPage, error) {
-	c.Logger.Infof("polling for runtimes with URL: %s", req.URL.String())
+	c.Logger.Debugf("polling for runtimes with URL: %s", req.URL.String())
 	query := url.Values{
 		"page": []string{fmt.Sprintf("%d", pageNum)},
 	}

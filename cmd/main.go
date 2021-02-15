@@ -70,7 +70,7 @@ func main() {
 		log.Fatalf("failed to load KEB config: %s", err)
 	}
 	kebClient := keb.NewClient(kebConfig, log)
-	log.Infof("keb config: %v", kebConfig)
+	log.Debugf("keb config: %v", kebConfig)
 
 	// Creating cache with no expiration and the data will never be cleaned up
 	cache := gocache.New(gocache.NoExpiration, gocache.NoExpiration)
