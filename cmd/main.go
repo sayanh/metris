@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/pprof"
 
+	skrnode "github.com/kyma-incubator/metris/pkg/skr/node"
+
 	"github.com/kyma-incubator/metris/pkg/keb"
 
 	"github.com/kyma-incubator/metris/pkg/edp"
@@ -93,6 +95,7 @@ func main() {
 		ScrapeInterval:  opts.ScrapeInterval,
 		Queue:           queue,
 		WorkersPoolSize: opts.WorkerPoolSize,
+		NodeConfig:      skrnode.Config{},
 	}
 
 	// Start execution

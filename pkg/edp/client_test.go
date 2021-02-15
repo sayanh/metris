@@ -68,13 +68,7 @@ func TestClientRetry(t *testing.T) {
 
 	countRetry := 0
 	counter := &countRetry
-	//expectedHeaders := http.Header{
-	//	"Authorization":   []string{fmt.Sprintf("Bearer %s", testToken)},
-	//	"Accept-Encoding": []string{"gzip"},
-	//	"Content-Length":  []string{"7"},
-	//	"User-Agent":      []string{"metris"},
-	//	"Content-Type":    []string{"application/json;charset=utf-8"},
-	//}
+	expectedCountRetry := 2
 	edpTestHandler := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		g.Expect(req.URL.Path).To(gomega.Equal(expectedPath))
 		g.Expect(req.Method).To(gomega.Equal(http.MethodPost))
@@ -97,9 +91,9 @@ func TestClientRetry(t *testing.T) {
 	g.Expect(gotReq.URL.Host).To(gomega.Equal(edpURL.Host))
 
 	_, err = edpClient.Send(gotReq, testData)
+	g.Expect(err).ShouldNot(gomega.BeNil())
 	g.Expect(err.Error()).Should(gomega.Equal("failed to POST event to EDP: failed to send event stream as EDP returned HTTP: 500"))
-	g.Expect(countRetry).Should(gomega.Equal(2))
-
+	g.Expect(countRetry).Should(gomega.Equal(expectedCountRetry))
 }
 
 func NewTestConfig(url string) *Config {

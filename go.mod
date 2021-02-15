@@ -5,6 +5,7 @@ go 1.15
 require (
 	github.com/gardener/gardener v1.16.2
 	github.com/gardener/gardener-extension-provider-azure v1.18.1
+	github.com/golang/mock v1.4.4
 	github.com/google/uuid v1.1.2
 	github.com/gorilla/mux v1.7.3
 	github.com/kelseyhightower/envconfig v1.4.0

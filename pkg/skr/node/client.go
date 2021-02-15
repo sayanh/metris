@@ -16,7 +16,7 @@ type Client struct {
 	Resource dynamic.NamespaceableResourceInterface
 }
 
-func NewClient(kubeconfig string) (*Client, error) {
+func (c Config) NewClient(kubeconfig string) (*Client, error) {
 	restClientConfig, err := clientcmd.RESTConfigFromKubeConfig([]byte(kubeconfig))
 	if err != nil {
 		return nil, err

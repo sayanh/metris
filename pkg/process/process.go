@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,10 +41,13 @@ type Process struct {
 	Providers       *Providers
 	ScrapeInterval  time.Duration
 	WorkersPoolSize int
+	NodeConfig      skrnode.ConfigInf
+	PVCConfig       skrpvc.ConfigInf
+	SvcConfig       skrsvc.ConfigInf
 	Logger          *logrus.Logger
 }
 
-func (p Process) generateMetricFor(identifier int, subAccountID string) (record metriscache.Record, err error) {
+func (p Process) generateRecordWithMetrics(identifier int, subAccountID string) (record metriscache.Record, err error) {
 	ctx := context.Background()
 	var ok bool
 
@@ -55,7 +59,7 @@ func (p Process) generateMetricFor(identifier int, subAccountID string) (record 
 
 	defer p.Queue.Done(subAccountID)
 	if record, ok = obj.(metriscache.Record); !ok {
-		err = fmt.Errorf("bad item from cache")
+		err = fmt.Errorf("bad item from cache, could not cast to a record obj")
 		return
 	}
 	p.Logger.Debugf("[worker: %d] record found from cache: %+v", identifier, record)
@@ -70,6 +74,10 @@ func (p Process) generateMetricFor(identifier int, subAccountID string) (record 
 			return
 		}
 		record.KubeConfig = string(secret.Data["kubeconfig"])
+		if record.KubeConfig == "" {
+			err = fmt.Errorf("kubeconfig for shoot not found")
+			return
+		}
 	}
 
 	// Get shoot CR
@@ -80,7 +88,7 @@ func (p Process) generateMetricFor(identifier int, subAccountID string) (record 
 	}
 
 	// Get nodes dynamic client
-	nodesClient, err := skrnode.NewClient(record.KubeConfig)
+	nodesClient, err := p.NodeConfig.NewClient(record.KubeConfig)
 	if err != nil {
 		return
 	}
@@ -98,7 +106,7 @@ func (p Process) generateMetricFor(identifier int, subAccountID string) (record 
 	}
 
 	// Get PVCs
-	pvcClient, err := skrpvc.NewClient(record.KubeConfig)
+	pvcClient, err := p.PVCConfig.NewClient(record.KubeConfig)
 	if err != nil {
 		return
 	}
@@ -110,7 +118,7 @@ func (p Process) generateMetricFor(identifier int, subAccountID string) (record 
 
 	// Get Svcs
 	var svcList *corev1.ServiceList
-	svcClient, err := skrsvc.NewClient(record.KubeConfig)
+	svcClient, err := p.SvcConfig.NewClient(record.KubeConfig)
 	if err != nil {
 		return
 	}
@@ -151,7 +159,7 @@ func (p Process) getOldRecordIfMetricExists(subAccountID string) (*metriscache.R
 }
 
 // pollKEBForRuntimes polls KEB for runtimes information
-func (p Process) pollKEBForRuntimes() {
+func (p *Process) pollKEBForRuntimes() {
 	kebReq, err := p.KEBClient.NewRequest()
 
 	if err != nil {
@@ -172,7 +180,7 @@ func (p Process) pollKEBForRuntimes() {
 	}
 }
 
-// Start runs the whole of collection and sending metrics
+// Start runs the complete process of collection and sending metrics
 func (p Process) Start() {
 
 	var wg sync.WaitGroup
@@ -184,7 +192,7 @@ func (p Process) Start() {
 		j := i
 		go func() {
 			defer wg.Done()
-			p.Execute(j)
+			p.execute(j)
 			p.Logger.Infof("########  Worker exits #######")
 		}()
 	}
@@ -192,25 +200,27 @@ func (p Process) Start() {
 }
 
 // Execute is executed by each worker to process an entry from the queue
-func (p Process) Execute(identifier int) {
+func (p *Process) execute(identifier int) {
 
 	for {
 		var payload []byte
 		// Pick up a subAccountID to process from queue
-		subAccountIDObj, isShuttingDown := p.Queue.Get()
-		if isShuttingDown {
-			//p.Cleanup()
-			return
-		}
+		subAccountIDObj, _ := p.Queue.Get()
+		// TODO Implement cleanup holistically in #kyma-project/control-plane/issues/512
+		//if isShuttingDown {
+		//	//p.Cleanup()
+		//	return
+		//}
 		subAccountID := fmt.Sprintf("%v", subAccountIDObj)
-
-		if subAccountID == "" {
+		if strings.TrimSpace(subAccountID) == "" {
 			p.Logger.Warnf("[worker: %d] cannot work with empty subAccountID", identifier)
+
+			// Nothing to do further
 			continue
 		}
-
 		p.Logger.Debugf("[worker: %d] subaccid: %v is fetched from queue", identifier, subAccountIDObj)
-		record, isOldMetricValid, err := p.getRecordWithOldOrNewMetricFor(identifier, subAccountID)
+
+		record, isOldMetricValid, err := p.getRecordWithOldOrNewMetric(identifier, subAccountID)
 		if err != nil {
 			p.Logger.Errorf("[worker: %d] no metric found/generated for subaccount id: %v", identifier, err)
 
@@ -220,6 +230,8 @@ func (p Process) Execute(identifier int) {
 			// Nothing to do further
 			continue
 		}
+
+		// Convert metric to JSON
 		payload, err = json.Marshal(*record.Metric)
 		if err != nil {
 			p.Logger.Errorf("[worker: %d] failed to json.Marshal metric for subaccount id: %v", identifier, err)
@@ -231,16 +243,17 @@ func (p Process) Execute(identifier int) {
 			continue
 		}
 
+		// Send metrics to EDP
 		// Note: EDP refers SubAccountID as tenant
 		p.Logger.Debugf("[worker: %d] sending EventStreamToEDP: tenant: %s payload: %s", identifier, subAccountID, string(payload))
 		err = p.sendEventStreamToEDP(subAccountID, payload)
 		if err != nil {
-			// Nothing to do further hence continue
 			p.Logger.Errorf("[worker: %d] failed to send metric to EDP for subAccountID: %s, event-stream: %s, with err: %v", identifier, subAccountID, string(payload), err)
 
 			p.Logger.Debugf("[worker: %d] successfully requed after %v for subAccountID %s", identifier, p.ScrapeInterval, subAccountID)
 			p.Queue.AddAfter(subAccountID, p.ScrapeInterval)
 
+			// Nothing to do further hence continue
 			continue
 		}
 		p.Logger.Infof("[worker: %d] successfully sent event stream for subaccountID: %s, shoot: %s", identifier, subAccountID, record.ShootName)
@@ -248,16 +261,17 @@ func (p Process) Execute(identifier int) {
 		if !isOldMetricValid {
 			p.Cache.Set(record.SubAccountID, *record, cache.NoExpiration)
 			p.Logger.Debugf("[worker: %d] successfully saved metric for subAccountID %s", identifier, record.SubAccountID)
+			p.Logger.Infof("[worker: %d] successfully saved metric for subAccountID %s", identifier, record.SubAccountID)
 		}
 
-		// Reque the subaccountID anyway
+		// Requeue the subAccountID anyway
 		p.Logger.Debugf("[worker: %d] successfully requed after %v for subAccountID %s", identifier, p.ScrapeInterval, subAccountID)
 		p.Queue.AddAfter(subAccountID, p.ScrapeInterval)
 	}
 }
 
-func (p Process) getRecordWithOldOrNewMetricFor(identifier int, subAccountID string) (*metriscache.Record, bool, error) {
-	record, err := p.generateMetricFor(identifier, subAccountID)
+func (p Process) getRecordWithOldOrNewMetric(identifier int, subAccountID string) (*metriscache.Record, bool, error) {
+	record, err := p.generateRecordWithMetrics(identifier, subAccountID)
 	if err != nil {
 		p.Logger.Errorf("failed to generate new metric for subaccountID: %v, err: %v", subAccountID, err)
 		// Get old data
@@ -268,7 +282,6 @@ func (p Process) getRecordWithOldOrNewMetricFor(identifier int, subAccountID str
 		}
 		return oldRecord, true, nil
 	}
-
 	return &record, false, nil
 }
 
@@ -306,7 +319,7 @@ func isClusterTrackable(runtime *kebruntime.RuntimeDTO) bool {
 }
 
 // populateCacheAndQueue populates Cache and Queue with new runtimes and deletes the runtimes which should not be tracked
-func (p Process) populateCacheAndQueue(runtimes *kebruntime.RuntimesPage) {
+func (p *Process) populateCacheAndQueue(runtimes *kebruntime.RuntimesPage) {
 
 	for _, runtime := range runtimes.Data {
 		if runtime.SubAccountID == "" {

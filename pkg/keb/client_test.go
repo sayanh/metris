@@ -124,13 +124,10 @@ func TestGetAllRuntimes(t *testing.T) {
 
 		getRuntimesHandler := http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 			// Success endpoint
-			switch req.URL.Path {
-			case expectedPathPrefixWith1Page:
-				_, err := rw.Write(runtimesResponse)
-				g.Expect(err).Should(gomega.BeNil())
-				rw.WriteHeader(http.StatusOK)
-				return
-			}
+			g.Expect(req.URL.Path).To(gomega.Equal(expectedPathPrefixWith1Page))
+			_, err := rw.Write(runtimesResponse)
+			g.Expect(err).Should(gomega.BeNil())
+			rw.WriteHeader(http.StatusOK)
 		})
 
 		// Start a local test HTTP server

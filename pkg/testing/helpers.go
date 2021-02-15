@@ -307,6 +307,10 @@ func GetPVCs() *corev1.PersistentVolumeClaimList {
 
 func GetPV(name, namespace, capacity string) *corev1.PersistentVolumeClaim {
 	return &corev1.PersistentVolumeClaim{
+		TypeMeta: metaV1.TypeMeta{
+			Kind:       "PersistentVolumeClaim",
+			APIVersion: "v1",
+		},
 		ObjectMeta: metaV1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
@@ -389,5 +393,22 @@ func WithClusterIP(service *corev1.Service) {
 func WithLoadBalancer(service *corev1.Service) {
 	service.Spec = corev1.ServiceSpec{
 		Type: "LoadBalancer",
+	}
+}
+
+func NewSecret(shootName, kubeconfigVal string) *corev1.Secret {
+	return &corev1.Secret{
+		TypeMeta: metaV1.TypeMeta{
+			Kind:       "Secret",
+			APIVersion: "v1",
+		},
+		ObjectMeta: metaV1.ObjectMeta{
+			Name:      fmt.Sprintf("%s.kubeconfig", shootName),
+			Namespace: "default",
+		},
+		Data: map[string][]byte{
+			//"kubeconfig": []byte("eyJmb28iOiAiYmFyIn0="),
+			"kubeconfig": []byte(fmt.Sprintf("%s", kubeconfigVal)),
+		},
 	}
 }
