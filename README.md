@@ -29,7 +29,7 @@ Metris scrapes all Kyma clusters and uses Shoot information to generate metrics 
      | `EDP_URL` | The EDP base URL where Metris will ingest event-stream to. | `-` |
      | `EDP_TOKEN` | The token used to connect to EDP. | `-` |
      | `EDP_NAMESPACE` | The namespace in EDP where Metris will ingest event-stream to.| `kyma-dev` |
-     | `EDP_DATASTREAM_NAME` | The datastream name in EDP where Metris will ingest event-stream to. | `consumption-metrics` |
+     | `EDP_DATASTREAM_NAME` | The datastream in EDP where Metris will ingest event-stream to. | `consumption-metrics` |
      | `EDP_DATASTREAM_VERSION` | The datastream version which Metris will use. | `1` |
      | `EDP_DATASTREAM_ENV` | The datastream environment which Metris will use.  | `dev` |
      | `EDP_TIMEOUT` | The timeout for Metris connections to EDP. | `30s` |

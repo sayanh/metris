@@ -43,7 +43,7 @@ func (eClient Client) NewRequest(dataTenant string) (*http.Request, error) {
 	edpURL := fmt.Sprintf(edpPathFormat,
 		eClient.Config.URL,
 		eClient.Config.Namespace,
-		eClient.Config.DataStream,
+		eClient.Config.DataStreamName,
 		eClient.Config.DataStreamVersion,
 		dataTenant,
 		eClient.Config.DataStreamEnv,

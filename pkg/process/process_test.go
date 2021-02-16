@@ -506,7 +506,7 @@ func newEDPConfig(url string) *edp.Config {
 		URL:               url,
 		Token:             testToken,
 		Namespace:         testNamespace,
-		DataStream:        testDataStream,
+		DataStreamName:    testDataStream,
 		DataStreamVersion: testDataStreamVersion,
 		DataStreamEnv:     testEnv,
 		Timeout:           timeout,

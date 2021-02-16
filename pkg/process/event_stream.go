@@ -71,7 +71,7 @@ func (inp Input) Parse(providers *Providers) (*edp.ConsumptionMetrics, error) {
 		// Calculate CPU and Memory
 		vmFeatures := providers.GetFeatures(providerType, nodeType)
 		if vmFeatures == nil {
-			return nil, fmt.Errorf("providerType : %s and nodeType: %s does not exist in the map", providerType, nodeType)
+			return nil, fmt.Errorf("providerType: %s and nodeType: %s does not exist in the map", providerType, nodeType)
 		}
 		provisionedCPUs += vmFeatures.CpuCores
 		provisionedMemory += vmFeatures.Memory
