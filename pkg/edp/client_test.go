@@ -17,7 +17,7 @@ import (
 const (
 	timeout               = 5 * time.Second
 	testTenant            = "testTenant"
-	testDataStream        = "dataStream"
+	testDataStreamName    = "dataStream"
 	testNamespace         = "namespace"
 	testDataStreamVersion = "v1"
 	testToken             = "token"
@@ -27,7 +27,7 @@ const (
 func TestClient(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
 	dataTenant := "testTenant"
-	expectedPath := fmt.Sprintf("/namespaces/%s/dataStreams/%s/%s/dataTenants/%s/%s/events", testNamespace, testDataStream, testDataStreamVersion, testTenant, testEnv)
+	expectedPath := fmt.Sprintf("/namespaces/%s/dataStreams/%s/%s/dataTenants/%s/%s/events", testNamespace, testDataStreamName, testDataStreamVersion, testTenant, testEnv)
 	expectedHeaders := http.Header{
 		"Authorization":   []string{fmt.Sprintf("Bearer %s", testToken)},
 		"Accept-Encoding": []string{"gzip"},
@@ -64,7 +64,7 @@ func TestClient(t *testing.T) {
 func TestClientRetry(t *testing.T) {
 	g := gomega.NewGomegaWithT(t)
 	dataTenant := "testTenant"
-	expectedPath := fmt.Sprintf("/namespaces/%s/dataStreams/%s/%s/dataTenants/%s/%s/events", testNamespace, testDataStream, testDataStreamVersion, testTenant, testEnv)
+	expectedPath := fmt.Sprintf("/namespaces/%s/dataStreams/%s/%s/dataTenants/%s/%s/events", testNamespace, testDataStreamName, testDataStreamVersion, testTenant, testEnv)
 
 	countRetry := 0
 	counter := &countRetry
@@ -101,7 +101,7 @@ func NewTestConfig(url string) *Config {
 		URL:               url,
 		Token:             testToken,
 		Namespace:         testNamespace,
-		DataStream:        testDataStream,
+		DataStreamName:    testDataStreamName,
 		DataStreamVersion: testDataStreamVersion,
 		DataStreamEnv:     testEnv,
 		Timeout:           timeout,

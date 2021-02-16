@@ -5,6 +5,10 @@ import (
 	"net/http"
 	"net/http/pprof"
 
+	skrsvc "github.com/kyma-incubator/metris/pkg/skr/svc"
+
+	skrpvc "github.com/kyma-incubator/metris/pkg/skr/pvc"
+
 	skrnode "github.com/kyma-incubator/metris/pkg/skr/node"
 
 	"github.com/kyma-incubator/metris/pkg/keb"
@@ -96,6 +100,8 @@ func main() {
 		Queue:           queue,
 		WorkersPoolSize: opts.WorkerPoolSize,
 		NodeConfig:      skrnode.Config{},
+		PVCConfig:       skrpvc.Config{},
+		SvcConfig:       skrsvc.Config{},
 	}
 
 	// Start execution

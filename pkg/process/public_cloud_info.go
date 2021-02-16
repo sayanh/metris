@@ -35,7 +35,7 @@ func (p Providers) GetFeatures(cloudProvider, vmType string) (f *Features) {
 			f = features
 		}
 	}
-	return
+	return nil
 }
 
 // LoadPublicCloudSpecs loads string data to Providers object from an env var

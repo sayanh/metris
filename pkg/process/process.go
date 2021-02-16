@@ -193,7 +193,7 @@ func (p Process) Start() {
 		go func() {
 			defer wg.Done()
 			p.execute(j)
-			p.Logger.Infof("########  Worker exits #######")
+			p.Logger.Infof("########  Worker exits ########")
 		}()
 	}
 	wg.Wait()
@@ -224,8 +224,8 @@ func (p *Process) execute(identifier int) {
 		if err != nil {
 			p.Logger.Errorf("[worker: %d] no metric found/generated for subaccount id: %v", identifier, err)
 
-			p.Logger.Debugf("[worker: %d] successfully requed after %v for subAccountID %s", identifier, p.ScrapeInterval, subAccountID)
 			p.Queue.AddAfter(subAccountID, p.ScrapeInterval)
+			p.Logger.Debugf("[worker: %d] successfully requed after %v for subAccountID %s", identifier, p.ScrapeInterval, subAccountID)
 
 			// Nothing to do further
 			continue
@@ -236,8 +236,8 @@ func (p *Process) execute(identifier int) {
 		if err != nil {
 			p.Logger.Errorf("[worker: %d] failed to json.Marshal metric for subaccount id: %v", identifier, err)
 
-			p.Logger.Debugf("[worker: %d] successfully requed after %v for subAccountID %s", identifier, p.ScrapeInterval, subAccountID)
 			p.Queue.AddAfter(subAccountID, p.ScrapeInterval)
+			p.Logger.Debugf("[worker: %d] successfully requed after %v for subAccountID %s", identifier, p.ScrapeInterval, subAccountID)
 
 			// Nothing to do further
 			continue
@@ -250,8 +250,8 @@ func (p *Process) execute(identifier int) {
 		if err != nil {
 			p.Logger.Errorf("[worker: %d] failed to send metric to EDP for subAccountID: %s, event-stream: %s, with err: %v", identifier, subAccountID, string(payload), err)
 
-			p.Logger.Debugf("[worker: %d] successfully requed after %v for subAccountID %s", identifier, p.ScrapeInterval, subAccountID)
 			p.Queue.AddAfter(subAccountID, p.ScrapeInterval)
+			p.Logger.Debugf("[worker: %d] successfully requed after %v for subAccountID %s", identifier, p.ScrapeInterval, subAccountID)
 
 			// Nothing to do further hence continue
 			continue
@@ -349,14 +349,14 @@ func (p *Process) populateCacheAndQueue(runtimes *kebruntime.RuntimesPage) {
 				if record.ShootName != runtime.ShootName {
 					// The shootname has changed hence the record in the cache is not valid anymore
 					// No need to queue as the subAccountID already exists in queue
-					p.Logger.Debugf("reset the values in cache: %v", runtime.SubAccountID)
 					p.Cache.Set(runtime.SubAccountID, newRecord, cache.NoExpiration)
+					p.Logger.Debugf("Resetted the values in cache: %v", runtime.SubAccountID)
 				}
 			}
 		} else {
 			if isFound {
-				p.Logger.Debugf("Deleting subAccountID: %v", runtime.SubAccountID)
 				p.Cache.Delete(runtime.SubAccountID)
+				p.Logger.Debugf("Deleted subAccountID: %v", runtime.SubAccountID)
 			}
 		}
 	}
