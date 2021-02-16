@@ -10,6 +10,5 @@ type Config struct {
 	DataStreamVersion string        `envconfig:"EDP_DATASTREAM_VERSION" default:"1" required:"true"`
 	DataStreamEnv     string        `envconfig:"EDP_DATASTREAM_ENV" default:"dev" required:"true"`
 	Timeout           time.Duration `envconfig:"EDP_TIMEOUT" default:"30s"`
-	//Buffer            int           `envconfig:"EDP_BUFFER" default:"100"`
-	EventRetry int `envconfig:"EDP_RETRY" default:"3"`
+	EventRetry        int           `envconfig:"EDP_RETRY" default:"3"`
 }
