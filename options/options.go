@@ -25,7 +25,7 @@ type Options struct {
 
 func ParseArgs() *Options {
 	gardenerSecretPath := flag.String("gardener-secret-path", "/gardener/kubeconfig", "The path to the secret which contains kubeconfig of the Gardener MPS cluster")
-	gardenerNamespace := flag.String("gardener-namespace", "garden-kyma-dev", "The namespace in gardener cluster where information on Kyma clusters are")
+	gardenerNamespace := flag.String("gardener-namespace", "garden-kyma-dev", "The namespace in gardener cluster where information about Kyma clusters are")
 	scrapeInterval := flag.Duration("scrape-interval", 3*time.Minute, "The wait duration of the interval between 2 executions of metrics generation")
 	workerPoolSize := flag.Int("worker-pool-size", 5, "The number of workers in the pool")
 	logLevelStr := flag.String("log-level", "info", "The log-level of the application. E.g. fatal, error, info, debug etc")
