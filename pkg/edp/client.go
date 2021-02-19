@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	"time"
 
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
@@ -22,9 +21,12 @@ type Client struct {
 }
 
 const (
-	edpPathFormat   = "%s/namespaces/%s/dataStreams/%s/%s/dataTenants/%s/%s/events"
-	contentType     = "application/json;charset=utf-8"
-	userAgentMetris = "metris"
+	edpPathFormat          = "%s/namespaces/%s/dataStreams/%s/%s/dataTenants/%s/%s/events"
+	contentType            = "application/json;charset=utf-8"
+	userAgentMetris        = "metris"
+	userAgentKeyHeader     = "User-Agent"
+	contentTypeKeyHeader   = "Content-Type"
+	authorizationKeyHeader = "Authorization"
 )
 
 func NewClient(config *Config, logger *logrus.Logger) *Client {
@@ -55,9 +57,9 @@ func (eClient Client) NewRequest(dataTenant string) (*http.Request, error) {
 		return nil, fmt.Errorf("failed generate request for EDP, %d: %v", http.StatusBadRequest, err)
 	}
 
-	req.Header.Set("User-Agent", userAgentMetris)
-	req.Header.Add("Content-Type", contentType)
-	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", eClient.Config.Token))
+	req.Header.Set(userAgentKeyHeader, userAgentMetris)
+	req.Header.Add(contentTypeKeyHeader, contentType)
+	req.Header.Add(authorizationKeyHeader, fmt.Sprintf("Bearer %s", eClient.Config.Token))
 
 	return req, nil
 }
@@ -65,10 +67,9 @@ func (eClient Client) NewRequest(dataTenant string) (*http.Request, error) {
 func (eClient Client) Send(req *http.Request, payload []byte) (*http.Response, error) {
 	var resp *http.Response
 	var err error
-	// TODO make it configurable
 	customBackoff := wait.Backoff{
 		Steps:    eClient.Config.EventRetry,
-		Duration: 5 * time.Second,
+		Duration: eClient.Config.Timeout,
 		Factor:   5.0,
 		Jitter:   0.1,
 	}

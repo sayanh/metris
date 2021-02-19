@@ -30,7 +30,7 @@ func TestParse(t *testing.T) {
 		{
 			name: "with Azure, 2 vm types, 3 pvcs(5,10 and 20Gi) and 2 svcs(1 clusterIP and 1 LoadBalancer)",
 			input: Input{
-				shoot:    metristesting.GetShoot("testShoot", metristesting.WithAzureProviderAndStandard_D8_v3VMs),
+				shoot:    metristesting.GetShoot("testShoot", metristesting.WithAzureProviderAndStandardD8V3VMs),
 				nodeList: metristesting.Get2Nodes(),
 				pvcList:  metristesting.Get3PVCs(),
 				svcList:  metristesting.Get2SvcsOfDiffTypes(),
@@ -60,7 +60,7 @@ func TestParse(t *testing.T) {
 		{
 			name: "with Azure with 3 vms and no pvc and svc",
 			input: Input{
-				shoot:    metristesting.GetShoot("testShoot", metristesting.WithAzureProviderAndStandard_D8_v3VMs),
+				shoot:    metristesting.GetShoot("testShoot", metristesting.WithAzureProviderAndStandardD8V3VMs),
 				nodeList: metristesting.Get3NodesWithStandardD8v3VMType(),
 			},
 			providers: *providers,
@@ -88,7 +88,7 @@ func TestParse(t *testing.T) {
 		{
 			name: "with Azure with 3 vms and no pvc and svc",
 			input: Input{
-				shoot:    metristesting.GetShoot("testShoot", metristesting.WithAzureProviderAndStandard_D8_v3VMs),
+				shoot:    metristesting.GetShoot("testShoot", metristesting.WithAzureProviderAndStandardD8V3VMs),
 				nodeList: metristesting.Get3NodesWithStandardD8v3VMType(),
 			},
 			providers: *providers,

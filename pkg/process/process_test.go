@@ -354,7 +354,7 @@ func TestExecute(t *testing.T) {
 	queue := workqueue.NewDelayingQueue()
 	queue.Add(subAccID)
 
-	shoot := metristesting.GetShoot(shootName, metristesting.WithAzureProviderAndStandard_D8_v3VMs)
+	shoot := metristesting.GetShoot(shootName, metristesting.WithAzureProviderAndStandardD8V3VMs)
 	shootClient, err := NewFakeShootClient(shoot)
 	g.Expect(err).Should(gomega.BeNil())
 	secretClient, err := NewFakeSecretClient(secret)

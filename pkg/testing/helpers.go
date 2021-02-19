@@ -131,7 +131,7 @@ func WithVMSpecs(shoot *gardencorev1beta1.Shoot) {
 	}
 }
 
-func WithAzureProviderAndStandard_D8_v3VMs(shoot *gardencorev1beta1.Shoot) {
+func WithAzureProviderAndStandardD8V3VMs(shoot *gardencorev1beta1.Shoot) {
 	infraConfig := NewInfraConfig()
 	byteInfraConfig, err := json.Marshal(infraConfig)
 	if err != nil {

@@ -24,7 +24,7 @@ type Features struct {
 type Feature struct {
 	CpuCores int     `json:"cpu_cores"`
 	Memory   float64 `json:"memory"`
-	Storage  int     `json:"storage"`
+	Storage  int64   `json:"storage"`
 	MaxNICs  int     `json:"max_nics"`
 }
 

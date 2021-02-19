@@ -78,7 +78,7 @@ func (inp Input) Parse(providers *Providers) (*edp.ConsumptionMetrics, error) {
 		vmTypes[nodeType] += 1
 
 		// Calculate node storage
-		nodeStorage += int64(vmFeatures.Storage)
+		nodeStorage += vmFeatures.Storage
 		volumeCount += 1
 
 	}

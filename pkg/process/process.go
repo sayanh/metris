@@ -47,6 +47,8 @@ type Process struct {
 	Logger          *logrus.Logger
 }
 
+const shootKubeconfigKey = "kubeconfig"
+
 func (p Process) generateRecordWithMetrics(identifier int, subAccountID string) (record metriscache.Record, err error) {
 	ctx := context.Background()
 	var ok bool
@@ -73,7 +75,8 @@ func (p Process) generateRecordWithMetrics(identifier int, subAccountID string) 
 		if err != nil {
 			return
 		}
-		record.KubeConfig = string(secret.Data["kubeconfig"])
+
+		record.KubeConfig = string(secret.Data[shootKubeconfigKey])
 		if record.KubeConfig == "" {
 			err = fmt.Errorf("kubeconfig for shoot not found")
 			return
